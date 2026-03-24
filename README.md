@@ -42,6 +42,51 @@ MEDIUM  c.format_string
 docker run --rm -v $(pwd):/app tanishs26/sast-cli:latest --table /app
 ```
 
+
+## 🛠 Installation (Local / Git)
+
+### Option 1 — Install via Cargo (Recommended)
+
+```bash
+git clone https://github.com/Tanish-26/sast-cli.git
+cd sast-cli/rust
+cargo build --release
+```
+
+Binary will be available at:
+
+```bash
+target/release/sast-cli
+```
+
+(Optional) Add to PATH:
+
+```bash
+export PATH=$PATH:$(pwd)/target/release
+```
+
+---
+
+### Option 2 — Install globally
+
+```bash
+cargo install --path apps/sast-cli
+```
+
+Then run:
+
+```bash
+sast-cli --help
+```
+
+---
+
+### Option 3 — Run without installing
+
+```bash
+cargo run -p sast-cli -- ./test.c --json
+```
+
 ---
 
 ## 📊 Output Formats
