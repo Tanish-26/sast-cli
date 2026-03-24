@@ -18,31 +18,6 @@ A high-performance **Rust-based SAST engine** for detecting memory corruption vu
 
 ---
 
-## 📊 Real Scan Example (AMD XRT)
-
-```bash
-docker run --rm -v /path/to/xrt:/scan tanishs26/sast-cli:latest --table /scan
-```
-
-Output:
-
-```
-RBOM: score=89 grade=C findings=41 exploitability=MEDIUM
-
-HIGH    c.buffer_overflow.pointer_arithmetic
-HIGH    c.use_after_free
-MEDIUM  c.format_string
-```
-
----
-
-## 🐳 Docker Usage
-
-```bash
-docker run --rm -v $(pwd):/app tanishs26/sast-cli:latest --table /app
-```
-
-
 ## 🛠 Installation (Local / Git)
 
 ### Option 1 — Install via Cargo (Recommended)
@@ -95,6 +70,30 @@ cargo run -p sast-cli -- ./test.c --json
 --table     # human readable
 --json      # machine readable
 --report    # markdown report
+```
+
+## 📊 Real Scan Example
+
+```bash
+docker run --rm -v /path/to/xrt:/scan tanishs26/sast-cli:latest --table /scan
+```
+
+Output:
+
+```
+RBOM: score=89 grade=C findings=41 exploitability=MEDIUM
+
+HIGH    c.buffer_overflow.pointer_arithmetic
+HIGH    c.use_after_free
+MEDIUM  c.format_string
+```
+
+---
+
+## 🐳 Docker Usage
+
+```bash
+docker run --rm -v $(pwd):/app tanishs26/sast-cli:latest --table /app
 ```
 
 ---
