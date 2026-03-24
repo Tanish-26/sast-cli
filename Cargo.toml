@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/sast-core",
+  "crates/sast-c",
+  "crates/sast-js",
+  "crates/rbom",
+  "apps/sast-cli",
+  "services/sast-api",
+  "services/rbom-api",
+]

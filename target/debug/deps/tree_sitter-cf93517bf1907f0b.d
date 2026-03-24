@@ -1,0 +1,13 @@
+/Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/deps/tree_sitter-cf93517bf1907f0b.d: /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/lib.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/ffi.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/util.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./README.md /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./bindings.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/../src/parser.h /Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/build/tree-sitter-46d899023f19e3a7/out/stdlib-symbols.txt
+
+/Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/deps/libtree_sitter-cf93517bf1907f0b.rmeta: /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/lib.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/ffi.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/util.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./README.md /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./bindings.rs /Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/../src/parser.h /Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/build/tree-sitter-46d899023f19e3a7/out/stdlib-symbols.txt
+
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/lib.rs:
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/ffi.rs:
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/util.rs:
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./README.md:
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/./bindings.rs:
+/Users/tanish/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.25.10/binding_rust/../src/parser.h:
+/Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/build/tree-sitter-46d899023f19e3a7/out/stdlib-symbols.txt:
+
+# env-dep:OUT_DIR=/Users/tanish/Desktop/GEN_AI_SAST/rust/target/debug/build/tree-sitter-46d899023f19e3a7/out

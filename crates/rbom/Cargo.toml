@@ -1,0 +1,9 @@
+[package]
+name = "rbom"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sast-core = { path = "../sast-core" }
+serde = { version = "1", features = ["derive"] }
+

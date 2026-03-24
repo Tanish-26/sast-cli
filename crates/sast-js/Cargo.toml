@@ -1,0 +1,10 @@
+[package]
+name = "sast-js"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sast-core = { path = "../sast-core" }
+tree-sitter = "0.25"
+tree-sitter-javascript = "0.25"
+

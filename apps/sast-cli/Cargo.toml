@@ -1,0 +1,13 @@
+[package]
+name = "sast-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+sast-core = { path = "../../crates/sast-core" }
+sast-c = { path = "../../crates/sast-c" }
+sast-js = { path = "../../crates/sast-js" }
+rbom = { path = "../../crates/rbom" }
+walkdir = "2"
