@@ -1,15 +1,15 @@
-# 🔍 SAST-CLI — Static Analysis for C/C++
+# SAST-CLI — Static Analysis for C/C++
 
 A high-performance **Rust-based SAST engine** for detecting memory corruption vulnerabilities in C/C++ codebases.
 
 ---
 
-## 🚀 Features
+## Features
 
-* 🧠 Taint Analysis (source → sink)
-* 🔁 Interprocedural Dataflow
-* 🧬 Pointer & alias tracking
-* ⚠️ Vulnerability Detection:
+* Taint Analysis (source → sink)
+* Interprocedural Dataflow
+* Pointer & alias tracking
+* Vulnerability Detection:
 
   * Buffer Overflow (incl. pointer arithmetic)
   * Use-After-Free
@@ -18,7 +18,7 @@ A high-performance **Rust-based SAST engine** for detecting memory corruption vu
 
 ---
 
-## 🛠 Installation (Local / Git)
+## Installation (Local / Git)
 
 ### Option 1 — Install via Cargo (Recommended)
 
@@ -64,7 +64,7 @@ cargo run -p sast-cli -- ./test.c --json
 
 ---
 
-## 📊 Output Formats
+## Output Formats
 
 ```bash
 --table     # human readable
@@ -72,7 +72,7 @@ cargo run -p sast-cli -- ./test.c --json
 --report    # markdown report
 ```
 
-## 📊 Real Scan Example
+## Real Scan Example
 
 ```bash
 docker run --rm -v /path/to/xrt:/scan tanishs26/sast-cli:latest --table /scan
@@ -90,7 +90,7 @@ MEDIUM  c.format_string
 
 ---
 
-## 🐳 Docker Usage
+## Docker Usage
 
 ```bash
 docker run --rm -v $(pwd):/app tanishs26/sast-cli:latest --table /app
@@ -98,7 +98,7 @@ docker run --rm -v $(pwd):/app tanishs26/sast-cli:latest --table /app
 
 ---
 
-## 🧠 Example Vulnerability
+## Example Vulnerability
 
 ```
 Path: buf -> buf+sz -> sprintf
@@ -107,7 +107,7 @@ Type: Pointer arithmetic buffer overflow
 
 ---
 
-## ⚙️ Local Development
+## Local Development
 
 ```bash
 cargo run -p sast-cli -- ./test.c --json
@@ -115,7 +115,7 @@ cargo run -p sast-cli -- ./test.c --json
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 * `sast-c` → C/C++ analysis engine
 * `sast-js` → JS analysis (experimental)
@@ -125,7 +125,7 @@ cargo run -p sast-cli -- ./test.c --json
 
 ---
 
-## 🚀 Roadmap
+## Roadmap
 
 * SARIF output (GitHub Security)
 * AI vulnerability explanation
@@ -134,7 +134,7 @@ cargo run -p sast-cli -- ./test.c --json
 
 ---
 
-## 👨‍💻 Author
+## Author
 
 Tanish (tanishs26)
 
