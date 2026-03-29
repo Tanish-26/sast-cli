@@ -1,4 +1,4 @@
-# SAST-CLI — Static Analysis for C/C++
+# SAST-CLI Static Analysis for C/C++
 
 A high-performance **Rust-based SAST engine** for detecting memory corruption vulnerabilities in C/C++ codebases.
 
@@ -20,7 +20,7 @@ A high-performance **Rust-based SAST engine** for detecting memory corruption vu
 
 ## Installation (Local / Git)
 
-### Option 1 — Install via Cargo (Recommended)
+### Option 1: Install via Cargo (Recommended)
 
 ```bash
 git clone https://github.com/Tanish-26/sast-cli.git
@@ -42,7 +42,7 @@ export PATH=$PATH:$(pwd)/target/release
 
 ---
 
-### Option 2 — Install globally
+### Option 2: Install globally
 
 ```bash
 cargo install --path apps/sast-cli
@@ -56,7 +56,7 @@ sast-cli --help
 
 ---
 
-### Option 3 — Run without installing
+### Option 3: Run without installing
 
 ```bash
 cargo run -p sast-cli -- ./test.c --json
