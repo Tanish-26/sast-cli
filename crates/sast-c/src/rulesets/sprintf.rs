@@ -3,7 +3,7 @@ use tree_sitter::Node;
 
 use crate::rule_engine::{finding, Rule};
 use crate::taint::{
-    callee_name, dst_has_pointer_arithmetic, expr_tainted, is_string_literal_node,
+    dst_has_pointer_arithmetic, expr_tainted, is_string_literal_node, resolved_callee_name,
     sprintf_format_is_bounded, sprintf_max_len, AnalysisCtx, Scope,
 };
 
@@ -19,7 +19,7 @@ impl Rule for SprintfRule {
             return None;
         }
         let callee = node.child_by_field_name("function")?;
-        let name = callee_name(&ctx.source, callee)?;
+        let name = resolved_callee_name(&ctx.source, callee, scope)?;
         if name != "sprintf" && name != "vsprintf" {
             return None;
         }
@@ -103,7 +103,23 @@ impl Rule for SprintfRule {
                             crate::taint::tainted_flow_path(&ctx.source, arg, scope, ctx, &name)
                         {
                             f.source_location = src_loc;
-                            f.path = Some(steps.clone());
+                            // Enrich taint path with destination variable flow for exploit-chain linking.
+                            let mut enriched = steps.clone();
+                            let dst_txt = crate::taint::node_text(&ctx.source, dst);
+                            let base =
+                                crate::taint::base_identifier(&ctx.source, dst).unwrap_or(dst_txt.clone());
+                            if enriched.last().is_some_and(|s| s == &name) {
+                                enriched.pop();
+                                enriched.push(base.clone());
+                                if dst_txt != base {
+                                    enriched.push(dst_txt);
+                                }
+                                enriched.push(name.clone());
+                            } else {
+                                enriched.push(base);
+                                enriched.push(name.clone());
+                            }
+                            f.path = Some(enriched);
                             if let Some(vc) = f.vuln_context.as_mut() {
                                 vc.input_source = steps.first().cloned();
                                 // also record which argument carried the taint
@@ -155,7 +171,23 @@ impl Rule for SprintfRule {
                         crate::taint::tainted_flow_path(&ctx.source, arg, scope, ctx, &name)
                     {
                         f.source_location = src_loc;
-                        f.path = Some(steps.clone());
+                        // Enrich taint path with destination variable flow for exploit-chain linking.
+                        let mut enriched = steps.clone();
+                        let dst_txt = crate::taint::node_text(&ctx.source, dst);
+                        let base =
+                            crate::taint::base_identifier(&ctx.source, dst).unwrap_or(dst_txt.clone());
+                        if enriched.last().is_some_and(|s| s == &name) {
+                            enriched.pop();
+                            enriched.push(base.clone());
+                            if dst_txt != base {
+                                enriched.push(dst_txt);
+                            }
+                            enriched.push(name.clone());
+                        } else {
+                            enriched.push(base);
+                            enriched.push(name.clone());
+                        }
+                        f.path = Some(enriched);
                         if let Some(vc) = f.vuln_context.as_mut() {
                             vc.input_source = steps.first().cloned();
                             let mut ap = vc.arg_positions.clone().unwrap_or_default();

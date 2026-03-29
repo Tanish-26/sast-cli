@@ -66,6 +66,8 @@ pub struct Finding {
     pub source_location: Option<Location>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploit_chain: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

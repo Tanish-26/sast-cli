@@ -222,6 +222,7 @@ mod tests {
             poc: None,
             source_location: None,
             path: None,
+            exploit_chain: None,
         }
     }
 

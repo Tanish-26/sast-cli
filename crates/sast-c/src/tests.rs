@@ -16,6 +16,20 @@ mod tests {
     }
 
     #[test]
+    fn detects_command_injection_via_system_function_pointer() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                int (*run)(const char*) = system;
+                char *x = getenv("X");
+                run(x);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.command_injection"));
+    }
+
+    #[test]
     fn detects_format_string_printf_argv() {
         let src = r#"
             #include <stdio.h>
@@ -41,6 +55,76 @@ mod tests {
         "#;
         let findings = crate::scan(src, "a.c", Language::C).unwrap();
         assert!(!findings.iter().any(|f| f.rule_id == "c.format_string"));
+    }
+
+    #[test]
+    fn detects_format_string_via_function_pointer() {
+        let src = r#"
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                int (*fn)() = printf;
+                fn(argv[1]);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.format_string"));
+    }
+
+    #[test]
+    fn detects_format_string_via_function_pointer_assignment() {
+        let src = r#"
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                void (*fn)(char*) = 0;
+                fn = (void (*)(char*))printf;
+                fn((char*)argv[1]);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.format_string"));
+    }
+
+    #[test]
+    fn detects_format_string_via_function_pointer_assignment_simple() {
+        let src = r#"
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                void (*fn)(char*) = 0;
+                fn = printf;
+                fn(argv[1]);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.format_string"));
+    }
+
+    #[test]
+    fn detects_format_string_via_function_pointer_propagation() {
+        let src = r#"
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                int (*fn1)() = printf;
+                int (*fn2)() = fn1;
+                fn2(argv[1]);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.format_string"));
+    }
+
+    #[test]
+    fn detects_format_string_via_function_pointer_long_chain() {
+        let src = r#"
+            #include <stdio.h>
+            int main(int argc, char **argv) {
+                int (*fn1)() = printf;
+                int (*fn2)() = fn1;
+                int (*fn3)() = fn2;
+                fn3(argv[1]);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.format_string"));
     }
 
     #[test]
@@ -271,6 +355,37 @@ mod tests {
     }
 
     #[test]
+    fn detects_double_free_via_alias() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                char *p = (char*)malloc(10);
+                char *q = p;
+                free(p);
+                free(q);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.double_free"));
+    }
+
+    #[test]
+    fn detects_double_free_via_free_function_pointer_and_alias() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                void (*fn)(void*) = free;
+                char *p = (char*)malloc(10);
+                char *q = p;
+                fn(p);
+                fn(q);
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.double_free"));
+    }
+
+    #[test]
     fn detects_use_after_free() {
         let src = r#"
             #include <stdlib.h>
@@ -282,6 +397,51 @@ mod tests {
         "#;
         let findings = crate::scan(src, "a.c", Language::C).unwrap();
         assert!(findings.iter().any(|f| f.rule_id == "c.use_after_free"));
+    }
+
+    #[test]
+    fn detects_use_after_free_via_alias() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                char *p = (char*)malloc(10);
+                char *q = p;
+                free(p);
+                q[0] = 'A';
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.use_after_free"));
+    }
+
+    #[test]
+    fn detects_heap_overflow_via_for_loop() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                char *p = (char*)malloc(4);
+                for (int i = 0; i < 10; i++) {
+                    p[i] = 0;
+                }
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.rule_id == "c.buffer_overflow"));
+    }
+
+    #[test]
+    fn detects_off_by_one_heap_overflow_via_for_loop() {
+        let src = r#"
+            #include <stdlib.h>
+            int main() {
+                char *p = (char*)malloc(4);
+                for (int i = 0; i <= 4; i++) {
+                    p[i] = 0;
+                }
+            }
+        "#;
+        let findings = crate::scan(src, "a.c", Language::C).unwrap();
+        assert!(findings.iter().any(|f| f.message.to_ascii_lowercase().contains("off-by-one")));
     }
 
     #[test]

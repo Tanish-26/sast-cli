@@ -39,6 +39,8 @@ pub(crate) struct VarInfo {
     pub(crate) tainted: bool,
     pub(crate) alloc: AllocState,
     pub(crate) buf_len: Option<usize>,
+    pub(crate) mem_id: Option<u64>,
+    pub(crate) range: Option<IntRange>,
     pub(crate) taint_meta: Option<TaintMeta>,
 }
 
@@ -48,15 +50,32 @@ impl Default for VarInfo {
             tainted: false,
             alloc: AllocState::Unknown,
             buf_len: None,
+            mem_id: None,
+            range: None,
             taint_meta: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IntRange {
+    pub(crate) min: i64,
+    pub(crate) max: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MemInfo {
+    pub(crate) state: AllocState,
+    pub(crate) size: Option<usize>,
 }
 
 pub(crate) struct Scope<'a> {
     parent: Option<&'a Scope<'a>>,
     vars: HashMap<String, VarInfo>,
     alias_adj: HashMap<String, BTreeSet<String>>,
+    mem: HashMap<u64, MemInfo>,
+    fn_alias: HashMap<String, String>,
+    fn_ptr: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +96,9 @@ impl<'a> Scope<'a> {
             parent,
             vars: HashMap::new(),
             alias_adj: HashMap::new(),
+            mem: HashMap::new(),
+            fn_alias: HashMap::new(),
+            fn_ptr: BTreeSet::new(),
         }
     }
 
@@ -89,6 +111,47 @@ impl<'a> Scope<'a> {
 
     pub(crate) fn set(&mut self, name: String, info: VarInfo) {
         self.vars.insert(name, info);
+    }
+
+    pub(crate) fn set_range(&mut self, name: &str, range: Option<IntRange>) {
+        let mut info = self.get(name);
+        info.range = range;
+        self.set(name.to_string(), info);
+    }
+
+    pub(crate) fn mem_get(&self, id: u64) -> Option<MemInfo> {
+        if let Some(m) = self.mem.get(&id) {
+            return Some(m.clone());
+        }
+        self.parent.and_then(|p| p.mem_get(id))
+    }
+
+    pub(crate) fn mem_set(&mut self, id: u64, info: MemInfo) {
+        self.mem.insert(id, info);
+    }
+
+    pub(crate) fn set_fn_alias(&mut self, name: &str, target: &str) {
+        if name.is_empty() || target.is_empty() {
+            return;
+        }
+        self.fn_alias.insert(name.to_string(), target.to_string());
+    }
+
+    pub(crate) fn resolve_fn_alias(&self, name: &str) -> Option<String> {
+        let mut cur = name.to_string();
+        for _ in 0..16 {
+            let next = self
+                .fn_alias
+                .get(&cur)
+                .cloned()
+                .or_else(|| self.parent.and_then(|p| p.fn_alias.get(&cur).cloned()));
+            let Some(next) = next else { break };
+            if next == cur {
+                break;
+            }
+            cur = next;
+        }
+        if cur == name { None } else { Some(cur) }
     }
 
     pub(crate) fn add_alias(&mut self, a: &str, b: &str) {
@@ -181,6 +244,19 @@ impl<'a> Scope<'a> {
         }
         steps.extend(chain_vars);
         (source_loc, steps)
+    }
+
+    pub(crate) fn mark_fn_ptr(&mut self, name: &str) {
+        if !name.is_empty() {
+            self.fn_ptr.insert(name.to_string());
+        }
+    }
+
+    pub(crate) fn is_fn_ptr(&self, name: &str) -> bool {
+        if self.fn_ptr.contains(name) {
+            return true;
+        }
+        self.parent.map(|p| p.is_fn_ptr(name)).unwrap_or(false)
     }
 }
 
@@ -595,7 +671,47 @@ fn scan_stmt(
             }
             return;
         }
-        "for_statement" | "while_statement" | "do_statement" | "switch_statement" => {
+        "for_statement" => {
+            if let Some(init) = node
+                .child_by_field_name("initializer")
+                .or_else(|| node.child_by_field_name("init"))
+                .or_else(|| node.child_by_field_name("declaration"))
+            {
+                if init.kind() == "declaration" {
+                    handle_declaration(source, init, path, findings, scope, ctx, registry, conditional);
+                } else {
+                    scan_expr(source, init, path, findings, scope, ExprCtx::Normal, ctx, registry, conditional);
+                }
+            }
+            if let Some(cond) = node.child_by_field_name("condition") {
+                scan_expr(source, cond, path, findings, scope, ExprCtx::Normal, ctx, registry, conditional);
+            }
+            if let Some(update) = node
+                .child_by_field_name("update")
+                .or_else(|| node.child_by_field_name("increment"))
+            {
+                scan_expr(source, update, path, findings, scope, ExprCtx::Normal, ctx, registry, conditional);
+            }
+
+            let loop_range = for_loop_range(source, node, scope);
+            let mut saved: Option<(String, Option<IntRange>)> = None;
+            if let Some((var, r)) = loop_range {
+                let old = scope.get(&var).range;
+                scope.set_range(&var, Some(r));
+                saved = Some((var, old));
+            }
+
+            if let Some(body) = node.child_by_field_name("body").or_else(|| node.child_by_field_name("statement"))
+            {
+                scan_stmt(source, body, path, findings, scope, ctx, registry, true);
+            }
+
+            if let Some((var, old)) = saved {
+                scope.set_range(&var, old);
+            }
+            return;
+        }
+        "while_statement" | "do_statement" | "switch_statement" => {
             if let Some(cond) = node.child_by_field_name("condition") {
                 scan_expr(source, cond, path, findings, scope, ExprCtx::Normal, ctx, registry, conditional);
             }
@@ -611,6 +727,59 @@ fn scan_stmt(
     for child in node.named_children(&mut cursor) {
         scan_stmt(source, child, path, findings, scope, ctx, registry, conditional);
     }
+}
+
+fn for_loop_range(source: &str, node: Node, scope: &Scope) -> Option<(String, IntRange)> {
+    let cond = node.child_by_field_name("condition")?;
+    if cond.kind() != "binary_expression" {
+        return None;
+    }
+    let left = cond.child_by_field_name("left").or_else(|| cond.named_child(0))?;
+    let right = cond.child_by_field_name("right").or_else(|| cond.named_child(1))?;
+    let var = extract_identifier(source, left)?;
+    let bound = expr_range(source, right, scope)?;
+    let op = cond.child(1).map(|c| node_text(source, c)).unwrap_or_default();
+
+    // Best-effort init: `i = 0` or `int i = 0`.
+    let mut start: Option<i64> = None;
+    if let Some(init) = node
+        .child_by_field_name("initializer")
+        .or_else(|| node.child_by_field_name("init"))
+        .or_else(|| node.child_by_field_name("declaration"))
+    {
+        if init.kind() == "assignment_expression" {
+            let il = init.child_by_field_name("left").or_else(|| init.named_child(0));
+            let ir = init.child_by_field_name("right").or_else(|| init.named_child(1));
+            if let (Some(il), Some(ir)) = (il, ir) {
+                if extract_identifier(source, il).as_deref() == Some(var.as_str()) {
+                    start = expr_range(source, ir, scope).map(|r| r.min);
+                }
+            }
+        } else if init.kind() == "declaration" {
+            let mut cursor = init.walk();
+            for child in init.named_children(&mut cursor) {
+                if child.kind() == "init_declarator" {
+                    let declarator = child.child_by_field_name("declarator");
+                    let value = child.child_by_field_name("value");
+                    if let (Some(decl), Some(val)) = (declarator, value) {
+                        let ids = declarator_idents(source, decl);
+                        if ids.iter().any(|id| id == &var) {
+                            start = expr_range(source, val, scope).map(|r| r.min);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let start = start?;
+
+    let max = match op.trim() {
+        "<" => bound.max.saturating_sub(1),
+        "<=" => bound.max,
+        _ => return None,
+    };
+    Some((var, IntRange { min: start, max }))
 }
 
 fn handle_declaration(
@@ -638,22 +807,54 @@ fn handle_declaration(
             let alloc = value
                 .and_then(|v| alloc_from_expr(source, v, ctx))
                 .unwrap_or(AllocState::Unknown);
+            let mem_alloc = value.and_then(|v| mem_alloc_from_expr(source, v));
+            let range = value.and_then(|v| expr_range(source, v, scope));
             if let Some(declarator) = declarator {
                 let buf_len = declarator_array_len(source, declarator);
                 for name in declarator_idents(source, declarator) {
+                    if is_function_pointer_declarator(declarator) {
+                        scope.mark_fn_ptr(&name);
+                    }
+                    let mem_id = if alloc == AllocState::Allocated {
+                        mem_alloc.as_ref().map(|m| m.id)
+                    } else {
+                        None
+                    };
                     scope.set(
                         name.clone(),
                         VarInfo {
                             tainted,
                             alloc,
                             buf_len,
+                            mem_id,
+                            range,
                             taint_meta: None,
                         },
                     );
+                    if let Some(m) = mem_alloc.as_ref() {
+                        scope.mem_set(
+                            m.id,
+                            MemInfo {
+                                state: AllocState::Allocated,
+                                size: m.size,
+                            },
+                        );
+                    }
                     if let Some(value) = value {
                         if let Some(target) = alias_target(source, value) {
                             // `char *p = buf;` → p aliases buf
                             scope.add_alias(&name, &target);
+                            // Pointer alias: propagate memory IDs (heap) through variable-to-variable assignments.
+                            let target_info = scope.get(&target);
+                            if target_info.mem_id.is_some() {
+                                let mut info = scope.get(&name);
+                                info.mem_id = target_info.mem_id;
+                                scope.set(name.clone(), info);
+                            }
+                        }
+                        if let Some(fn_target) = function_alias_target(source, value, scope) {
+                            scope.set_fn_alias(&name, &fn_target);
+                            scope.mark_fn_ptr(&name);
                         }
                     }
                     if tainted {
@@ -687,7 +888,22 @@ fn scan_expr(
     registry: &crate::rule_engine::RuleRegistry,
     conditional: bool,
 ) {
-    if node.kind() == "call_expression" || node.kind() == "identifier" {
+    // Function pointer resolution debug logging (TEMP).
+    // Enable with: FP_DEBUG=1
+    if node.kind() == "call_expression" {
+        if let Some(callee) = node.child_by_field_name("function") {
+            if callee.kind() == "identifier" {
+                let name = node_text(source, callee);
+                if let Some(resolved) = scope.resolve_fn_alias(&name) {
+                    if std::env::var("FP_DEBUG").ok().as_deref() == Some("1") {
+                        eprintln!("[FP] {name} -> {resolved}");
+                    }
+                }
+            }
+        }
+    }
+
+    if node.kind() == "call_expression" || node.kind() == "identifier" || node.kind() == "subscript_expression" {
         let mut fs = registry.check_node(node, actx, scope);
         for f in &mut fs {
             f.conditional = conditional;
@@ -707,22 +923,54 @@ fn scan_expr(
         }
         if let (Some(left), Some(right)) = (left, right) {
             let rhs_taint = expr_tainted(source, right, scope, actx);
-            let rhs_alloc =
-                alloc_from_expr(source, right, actx).unwrap_or(scope.get(&node_text(source, left)).alloc);
+            let rhs_alloc = alloc_from_expr(source, right, actx)
+                .unwrap_or(scope.get(&node_text(source, left)).alloc);
+            let rhs_mem_alloc = mem_alloc_from_expr(source, right);
+            let rhs_range = expr_range(source, right, scope);
             if left.kind() == "identifier" {
                 let left_name = node_text(source, left);
                 if let Some(target) = alias_target(source, right) {
                     scope.add_alias(&left_name, &target);
                 }
+                // Propagate function-pointer-ness across assignment.
+                if let Some(src_id) = extract_identifier(source, right) {
+                    if scope.is_fn_ptr(&src_id) {
+                        scope.mark_fn_ptr(&left_name);
+                    }
+                }
+                if let Some(fn_target) = function_alias_target(source, right, scope) {
+                    scope.set_fn_alias(&left_name, &fn_target);
+                    scope.mark_fn_ptr(&left_name);
+                }
 
+                let mut left_info = scope.get(&left_name);
+                left_info.tainted = rhs_taint;
+                left_info.alloc = rhs_alloc;
+                left_info.range = rhs_range.or(left_info.range);
+                if rhs_alloc == AllocState::Allocated {
+                    if let Some(ma) = rhs_mem_alloc.as_ref() {
+                        left_info.mem_id = Some(ma.id);
+                        scope.mem_set(
+                            ma.id,
+                            MemInfo {
+                                state: AllocState::Allocated,
+                                size: ma.size,
+                            },
+                        );
+                    }
+                } else if let Some(target) = alias_target(source, right) {
+                    let target_info = scope.get(&target);
+                    if target_info.mem_id.is_some() {
+                        left_info.mem_id = target_info.mem_id;
+                    }
+                }
                 scope.set(
                     left_name.clone(),
                     VarInfo {
-                        tainted: rhs_taint,
-                        alloc: rhs_alloc,
-                        buf_len: scope.get(&left_name).buf_len,
+                        buf_len: left_info.buf_len,
                         taint_meta: None,
-                    },
+                        ..left_info
+                    }
                 );
                 if rhs_taint {
                     let meta = taint_meta_from_expr(source, Some(right), scope, actx, left_name.as_str())
@@ -748,17 +996,24 @@ fn scan_expr(
 fn apply_call_effects(source: &str, node: Node, path: &str, scope: &mut Scope) {
     let callee = node.child_by_field_name("function");
     let Some(callee) = callee else { return };
-    let name = callee_name(source, callee);
+    let name = resolved_callee_name(source, callee, scope);
     let Some(name) = name else { return };
 
     // Handle free() state transitions.
     if name == "free" {
         let arg0 = node.child_by_field_name("arguments").and_then(|a| a.named_child(0));
         if let Some(arg0) = arg0 {
-            if arg0.kind() == "identifier" {
-                let var = node_text(source, arg0);
+            if let Some(var) = extract_identifier(source, arg0) {
                 let mut info = scope.get(&var);
                 info.alloc = AllocState::Freed;
+                if let Some(id) = info.mem_id {
+                    let mut mi = scope.mem_get(id).unwrap_or(MemInfo {
+                        state: AllocState::Unknown,
+                        size: None,
+                    });
+                    mi.state = AllocState::Freed;
+                    scope.mem_set(id, mi);
+                }
                 scope.set(var, info);
             }
         }
@@ -1304,15 +1559,148 @@ fn is_source_expr(source: &str, node: Node, scope: &Scope) -> bool {
 }
 
 fn alloc_from_expr(source: &str, node: Node, _actx: &AnalysisCtx) -> Option<AllocState> {
-    if node.kind() != "call_expression" {
+    let mut cur = node;
+    loop {
+        match cur.kind() {
+            "parenthesized_expression" => {
+                cur = cur.named_child(0)?;
+            }
+            "cast_expression" => {
+                cur = cur.child_by_field_name("value").or_else(|| cur.named_child(0))?;
+            }
+            _ => break,
+        }
+    }
+    if cur.kind() != "call_expression" {
         return None;
     }
-    let callee = node.child_by_field_name("function")?;
+    let callee = cur.child_by_field_name("function")?;
     let name = callee_name(source, callee)?;
     if matches!(rules::is_sink_function(&name), Some(SinkKind::MallocFamily)) {
         return Some(AllocState::Allocated);
     }
     None
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MemAlloc {
+    id: u64,
+    size: Option<usize>,
+}
+
+fn mem_alloc_from_expr(source: &str, node: Node) -> Option<MemAlloc> {
+    let mut cur = node;
+    loop {
+        match cur.kind() {
+            "parenthesized_expression" => {
+                cur = cur.named_child(0)?;
+            }
+            "cast_expression" => {
+                cur = cur.child_by_field_name("value").or_else(|| cur.named_child(0))?;
+            }
+            _ => break,
+        }
+    }
+    if cur.kind() != "call_expression" {
+        return None;
+    }
+    let callee = cur.child_by_field_name("function")?;
+    let name = callee_name(source, callee)?;
+    if !matches!(rules::is_sink_function(&name), Some(SinkKind::MallocFamily)) {
+        return None;
+    }
+    let id = alloc_mem_id(cur);
+    let size = malloc_size_from_call(source, cur, &name);
+    Some(MemAlloc { id, size })
+}
+
+fn alloc_mem_id(node: Node) -> u64 {
+    // Deterministic per file: use byte offsets to avoid global counters.
+    let a = node.start_byte() as u64;
+    let b = node.end_byte() as u64;
+    a ^ (b << 32)
+}
+
+fn malloc_size_from_call(source: &str, call: Node, name: &str) -> Option<usize> {
+    let args = call.child_by_field_name("arguments")?;
+    match name {
+        "malloc" => args.named_child(0).and_then(|n| parse_usize(&node_text(source, n))),
+        "realloc" => args.named_child(1).and_then(|n| parse_usize(&node_text(source, n))),
+        "calloc" => {
+            let a = args.named_child(0).and_then(|n| parse_usize(&node_text(source, n)))?;
+            let b = args.named_child(1).and_then(|n| parse_usize(&node_text(source, n)))?;
+            a.checked_mul(b)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn expr_range(source: &str, node: Node, scope: &Scope) -> Option<IntRange> {
+    match node.kind() {
+        "number_literal" => parse_i64(&node_text(source, node)).map(|n| IntRange { min: n, max: n }),
+        "identifier" => scope.get(&node_text(source, node)).range,
+        "parenthesized_expression" => node.named_child(0).and_then(|c| expr_range(source, c, scope)),
+        "unary_expression" => {
+            let op = node.child(0).map(|c| node_text(source, c)).unwrap_or_default();
+            let arg = node.child_by_field_name("argument").or_else(|| node.named_child(0))?;
+            let r = expr_range(source, arg, scope)?;
+            if op.trim() == "-" {
+                Some(IntRange { min: -r.max, max: -r.min })
+            } else {
+                Some(r)
+            }
+        }
+        "binary_expression" => {
+            let left = node.child_by_field_name("left").or_else(|| node.named_child(0))?;
+            let right = node.child_by_field_name("right").or_else(|| node.named_child(1))?;
+            let op = node.child(1).map(|c| node_text(source, c)).unwrap_or_default();
+            let l = expr_range(source, left, scope)?;
+            let r = expr_range(source, right, scope)?;
+            match op.trim() {
+                "+" => Some(IntRange { min: l.min.saturating_add(r.min), max: l.max.saturating_add(r.max) }),
+                "-" => Some(IntRange { min: l.min.saturating_sub(r.max), max: l.max.saturating_sub(r.min) }),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_i64(s: &str) -> Option<i64> {
+    let t = s.trim();
+    if t.starts_with("0x") || t.starts_with("0X") {
+        i64::from_str_radix(t.trim_start_matches("0x").trim_start_matches("0X"), 16).ok()
+    } else {
+        t.parse::<i64>().ok()
+    }
+}
+
+fn function_alias_target(source: &str, expr: Node, scope: &Scope) -> Option<String> {
+    let id = extract_identifier(source, expr)?;
+    if rules::is_sink_function(&id).is_some() || rules::is_source_function(&id).is_some() {
+        return Some(id);
+    }
+    // Simple propagation: fn2 = fn1
+    scope.resolve_fn_alias(&id)
+}
+
+fn is_function_pointer_declarator(node: Node) -> bool {
+    // Heuristic: function pointer declarators contain both a pointer layer and a function declarator.
+    let mut saw_ptr = false;
+    let mut saw_fn = false;
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "pointer_declarator" => saw_ptr = true,
+            "function_declarator" => saw_fn = true,
+            _ => {}
+        }
+        let mut cursor = n.walk();
+        for c in n.named_children(&mut cursor) {
+            stack.push(c);
+        }
+    }
+    saw_ptr && saw_fn
 }
 
 fn declarator_idents(source: &str, node: Node) -> Vec<String> {
@@ -1465,6 +1853,14 @@ pub(crate) fn callee_name(source: &str, node: Node) -> Option<String> {
             .map(|n| node_text(source, n)),
         _ => None,
     }
+}
+
+pub(crate) fn resolved_callee_name(source: &str, node: Node, scope: &Scope) -> Option<String> {
+    let direct = callee_name(source, node)?;
+    if let Some(mapped) = scope.resolve_fn_alias(&direct) {
+        return Some(mapped);
+    }
+    Some(direct)
 }
 
 pub(crate) fn node_text(source: &str, node: Node) -> String {

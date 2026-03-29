@@ -23,6 +23,8 @@ impl RuleRegistry {
             Box::new(crate::rulesets::strcpy::StrcpyRule),
             Box::new(crate::rulesets::printf::PrintfRule),
             Box::new(crate::rulesets::command::CommandExecRule),
+            Box::new(crate::rulesets::heap::HeapIndexRule),
+            Box::new(crate::rulesets::heap::MemcpyMemsetRule),
             Box::new(crate::rulesets::memory::DoubleFreeRule),
             Box::new(crate::rulesets::memory::UseAfterFreeRule),
         ])
@@ -60,5 +62,6 @@ pub(crate) fn finding(ctx: &AnalysisCtx, node: Node, rule_id: &str, msg: &str, s
         poc: None,
         source_location: None,
         path: None,
+        exploit_chain: None,
     }
 }

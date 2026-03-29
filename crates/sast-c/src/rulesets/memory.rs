@@ -2,7 +2,7 @@ use sast_core::Severity;
 use tree_sitter::Node;
 
 use crate::rule_engine::{finding, Rule};
-use crate::taint::{base_identifier, callee_name, is_node_within, AnalysisCtx, AllocState, Scope};
+use crate::taint::{base_identifier, is_node_within, resolved_callee_name, AnalysisCtx, AllocState, Scope};
 
 pub struct DoubleFreeRule;
 pub struct UseAfterFreeRule;
@@ -17,7 +17,7 @@ impl Rule for DoubleFreeRule {
             return None;
         }
         let callee = node.child_by_field_name("function")?;
-        let name = callee_name(&ctx.source, callee)?;
+        let name = resolved_callee_name(&ctx.source, callee, scope)?;
         if name != "free" {
             return None;
         }
@@ -26,7 +26,12 @@ impl Rule for DoubleFreeRule {
             .and_then(|a| a.named_child(0))?;
         let id = base_identifier(&ctx.source, arg0)?;
         let info = scope.get(&id);
-        if info.alloc == AllocState::Freed {
+        let freed = info
+            .mem_id
+            .and_then(|mid| scope.mem_get(mid))
+            .map(|m| m.state == AllocState::Freed)
+            .unwrap_or(info.alloc == AllocState::Freed);
+        if freed {
             let mut f = finding(
                 ctx,
                 node,
@@ -61,10 +66,15 @@ impl Rule for UseAfterFreeRule {
         }
         let name = crate::taint::node_text(&ctx.source, node);
         let info = scope.get(&name);
-        if info.alloc != AllocState::Freed {
+        let freed = info
+            .mem_id
+            .and_then(|mid| scope.mem_get(mid))
+            .map(|m| m.state == AllocState::Freed)
+            .unwrap_or(info.alloc == AllocState::Freed);
+        if !freed {
             return None;
         }
-        if is_direct_assignment_target(node) || is_in_free_arg(&ctx.source, node) {
+        if is_direct_assignment_target(node) || is_in_free_arg(&ctx.source, node, scope) {
             return None;
         }
         let mut f = finding(
@@ -104,13 +114,13 @@ fn is_direct_assignment_target(node: Node) -> bool {
     false
 }
 
-fn is_in_free_arg(source: &str, node: Node) -> bool {
+fn is_in_free_arg(source: &str, node: Node, scope: &Scope) -> bool {
     let mut cur = node;
     while let Some(p) = cur.parent() {
         if p.kind() == "call_expression" {
             let callee = p.child_by_field_name("function");
             if let Some(callee) = callee {
-                if callee_name(source, callee).as_deref() == Some("free") {
+                if resolved_callee_name(source, callee, scope).as_deref() == Some("free") {
                     if let Some(args) = p.child_by_field_name("arguments") {
                         if let Some(arg0) = args.named_child(0) {
                             return is_node_within(arg0, node);

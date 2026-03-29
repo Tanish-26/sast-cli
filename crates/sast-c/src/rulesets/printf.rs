@@ -2,7 +2,7 @@ use sast_core::Severity;
 use tree_sitter::Node;
 
 use crate::rule_engine::{finding, Rule};
-use crate::taint::{callee_name, expr_tainted, is_string_literal_node, AnalysisCtx, Scope};
+use crate::taint::{expr_tainted, is_string_literal_node, resolved_callee_name, AnalysisCtx, Scope};
 
 pub struct PrintfRule;
 
@@ -16,7 +16,7 @@ impl Rule for PrintfRule {
             return None;
         }
         let callee = node.child_by_field_name("function")?;
-        let name = callee_name(&ctx.source, callee)?;
+        let name = resolved_callee_name(&ctx.source, callee, scope)?;
         if !crate::rules::is_printf_family(&name) {
             return None;
         }

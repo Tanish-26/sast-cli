@@ -3,7 +3,7 @@ use tree_sitter::Node;
 
 use crate::rule_engine::{finding, Rule};
 use crate::taint::{
-    callee_name, dst_has_pointer_arithmetic, expr_tainted, is_const_copy_safe, AnalysisCtx, Scope,
+    dst_has_pointer_arithmetic, expr_tainted, is_const_copy_safe, resolved_callee_name, AnalysisCtx, Scope,
 };
 
 pub struct StrcpyRule;
@@ -18,7 +18,7 @@ impl Rule for StrcpyRule {
             return None;
         }
         let callee = node.child_by_field_name("function")?;
-        let name = callee_name(&ctx.source, callee)?;
+        let name = resolved_callee_name(&ctx.source, callee, scope)?;
         let is_target = matches!(name.as_str(), "strcpy" | "strcat" | "gets");
         if !is_target {
             return None;
@@ -87,7 +87,24 @@ impl Rule for StrcpyRule {
                     crate::taint::tainted_flow_path(&ctx.source, flow_expr, scope, ctx, &name)
                 {
                     f.source_location = src_loc;
-                    f.path = Some(steps.clone());
+                    // Enrich taint path with destination variable flow so exploit-chain detection can link via shared vars.
+                    let mut enriched = steps.clone();
+                    if let Some(d) = dst {
+                        let dst_txt = crate::taint::node_text(&ctx.source, d);
+                        let base = crate::taint::base_identifier(&ctx.source, d).unwrap_or(dst_txt.clone());
+                        if enriched.last().is_some_and(|s| s == &name) {
+                            enriched.pop();
+                            enriched.push(base.clone());
+                            if dst_txt != base {
+                                enriched.push(dst_txt);
+                            }
+                            enriched.push(name.clone());
+                        } else {
+                            enriched.push(base);
+                            enriched.push(name.clone());
+                        }
+                    }
+                    f.path = Some(enriched);
                     if let Some(vc) = f.vuln_context.as_mut() {
                         vc.input_source = steps.first().cloned();
                     }

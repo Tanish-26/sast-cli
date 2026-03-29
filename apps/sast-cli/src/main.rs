@@ -111,6 +111,7 @@ fn main() -> ExitCode {
     }
 
     poc::attach(&mut findings);
+    detect_exploit_chains(&mut findings);
     sort_and_rank(&mut findings);
 
     let rbom = rbom::score(&findings);
@@ -315,6 +316,9 @@ fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
                 println!("    - ... ({} more)", g.locations.len() - 10);
             }
         }
+        if let Some(chain) = &f.exploit_chain {
+            println!("  Exploit chain: {}", chain.join(" -> "));
+        }
         if let Some(p) = &f.path {
             println!("  Path: {}", p.join(" -> "));
         }
@@ -421,6 +425,9 @@ fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
         }
         if let Some(r) = &f.reason {
             println!("- Reason: {}", r);
+        }
+        if let Some(chain) = &f.exploit_chain {
+            println!("- Exploit chain: `{}`", chain.join(" -> "));
         }
         println!();
 
@@ -726,6 +733,147 @@ fn fix_suggestion(f: &sast_core::Finding) -> String {
     "Apply input validation and safer APIs for this pattern.".to_string()
 }
 
+fn detect_exploit_chains(findings: &mut [sast_core::Finding]) {
+    use std::collections::{BTreeSet, HashMap};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Cat {
+        BufferOverflow,
+        PointerOverwrite,
+        UseAfterFree,
+    }
+
+    fn cat_for(rule_id: &str) -> Option<Cat> {
+        if rule_id == "c.buffer_overflow.pointer_arithmetic" {
+            return Some(Cat::PointerOverwrite);
+        }
+        if rule_id.starts_with("c.buffer_overflow") {
+            return Some(Cat::BufferOverflow);
+        }
+        if rule_id == "c.use_after_free" {
+            return Some(Cat::UseAfterFree);
+        }
+        None
+    }
+
+    fn cat_name(c: Cat) -> &'static str {
+        match c {
+            Cat::BufferOverflow => "buffer_overflow",
+            Cat::PointerOverwrite => "pointer_overwrite",
+            Cat::UseAfterFree => "use_after_free",
+        }
+    }
+
+    fn first_ident(s: &str) -> Option<String> {
+        let bytes = s.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let ch = bytes[i] as char;
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let start = i;
+                i += 1;
+                while i < bytes.len() {
+                    let c = bytes[i] as char;
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                return Some(s[start..i].to_string());
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn is_noise(tok: &str, f: &sast_core::Finding) -> bool {
+        if tok.is_empty() {
+            return true;
+        }
+        if let Some(vc) = &f.vuln_context {
+            if vc.sink.as_deref() == Some(tok) {
+                return true;
+            }
+            if vc.input_source.as_deref() == Some(tok) {
+                return true;
+            }
+        }
+        matches!(
+            tok,
+            "argv"
+                | "getenv"
+                | "read"
+                | "recv"
+                | "scanf"
+                | "sprintf"
+                | "snprintf"
+                | "printf"
+                | "strcpy"
+                | "strcat"
+                | "gets"
+                | "system"
+                | "free"
+                | "use"
+        )
+    }
+
+    fn vars_for(f: &sast_core::Finding) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        if let Some(steps) = &f.path {
+            for s in steps {
+                if let Some(id) = first_ident(s) {
+                    if !is_noise(&id, f) {
+                        out.insert(id);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    let mut var_cats: HashMap<String, BTreeSet<Cat>> = HashMap::new();
+    let mut var_idxs: HashMap<String, Vec<usize>> = HashMap::new();
+
+    for (idx, f) in findings.iter().enumerate() {
+        let Some(cat) = cat_for(&f.rule_id) else { continue };
+        for v in vars_for(f) {
+            var_cats.entry(v.clone()).or_default().insert(cat);
+            var_idxs.entry(v).or_default().push(idx);
+        }
+    }
+
+    for (var, cats) in &var_cats {
+        // Build a simple ordered chain from the categories we observed for this variable.
+        let mut chain: Vec<&'static str> = Vec::new();
+        // Pointer-overwrite implies an overflow stage as well.
+        if cats.contains(&Cat::BufferOverflow) || cats.contains(&Cat::PointerOverwrite) {
+            chain.push(cat_name(Cat::BufferOverflow));
+        }
+        if cats.contains(&Cat::PointerOverwrite) {
+            chain.push(cat_name(Cat::PointerOverwrite));
+        }
+        if cats.contains(&Cat::UseAfterFree) {
+            chain.push(cat_name(Cat::UseAfterFree));
+        }
+
+        // Require multiple distinct stages to consider it a chain.
+        if chain.len() < 2 {
+            continue;
+        }
+
+        let chain_owned = chain.into_iter().map(str::to_string).collect::<Vec<_>>();
+        if let Some(idxs) = var_idxs.get(var) {
+            for &i in idxs {
+                let cur_len = findings[i].exploit_chain.as_ref().map(|c| c.len()).unwrap_or(0);
+                if chain_owned.len() > cur_len {
+                    findings[i].exploit_chain = Some(chain_owned.clone());
+                }
+            }
+        }
+    }
+}
+
 fn color_severity(label: &str, sev: sast_core::Severity) -> String {
     let (prefix, suffix) = match sev {
         sast_core::Severity::Critical => ("\x1b[1;31m", "\x1b[0m"),
@@ -765,6 +913,7 @@ fn sort_and_rank(findings: &mut Vec<sast_core::Finding>) {
 
     #[derive(Clone, Copy, Debug)]
     struct Key {
+        chain: u8,
         exp: u8,
         sev: u8,
         tainted: u8,
@@ -774,7 +923,9 @@ fn sort_and_rank(findings: &mut Vec<sast_core::Finding>) {
         .drain(..)
         .map(|f| {
             let s = rbom::score_finding(&f);
+            let chain = f.exploit_chain.as_ref().map(|c| c.len()).unwrap_or(0).min(255) as u8;
             let key = Key {
+                chain,
                 exp: exp_rank(s.exploitability),
                 sev: sev_rank(f.severity),
                 tainted: if s.tainted { 1 } else { 0 },
@@ -784,9 +935,10 @@ fn sort_and_rank(findings: &mut Vec<sast_core::Finding>) {
         .collect();
 
     keyed.sort_by(|(ka, fa), (kb, fb)| {
-        // exploitability (desc), severity (desc), tainted first (desc), then deterministic tiebreakers
-        kb.exp
-            .cmp(&ka.exp)
+        // exploit chains first, then exploitability (desc), severity (desc), tainted first (desc)
+        kb.chain
+            .cmp(&ka.chain)
+            .then_with(|| kb.exp.cmp(&ka.exp))
             .then_with(|| kb.sev.cmp(&ka.sev))
             .then_with(|| kb.tainted.cmp(&ka.tainted))
             .then_with(|| fa.location.path.cmp(&fb.location.path))
