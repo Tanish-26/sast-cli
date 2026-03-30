@@ -1,37 +1,77 @@
-# SAST-CLI — Static Analysis for C/C++
+# sast-cli — Advanced Static Analysis Engine for C/C++
 
-A high-performance **Rust-based SAST engine** for detecting memory corruption vulnerabilities in C/C++ codebases.
+sast-cli is a high-performance static analysis (SAST) engine written in Rust for detecting and validating memory corruption and input-driven vulnerabilities in C/C++ codebases.
+
+It combines interprocedural dataflow analysis with multi-stage validation (CFG, feasible path, dominance, and state tracking) to significantly reduce false positives while maintaining high detection coverage.
+
+---
+
+## Overview
+
+Traditional SAST tools often suffer from either:
+
+* High recall but noisy results (false positives), or
+* High precision but limited detection
+
+sast-cli bridges this gap using a **two-stage pipeline**:
+
+### Detection Phase
+
+* Taint analysis (source → sink)
+* Interprocedural dataflow tracking
+* Pointer and alias propagation
+* Function call resolution
+
+### Validation Phase
+
+* Control Flow Graph (CFG)
+* Feasible path analysis (constraint-aware)
+* Dominator analysis (execution guarantees)
+* Memory state tracking (alloc → free → use)
+* Structural validation for unsafe APIs
+
+This ensures reported vulnerabilities are not just possible, but **actually exploitable**.
 
 ---
 
 ## Features
 
-- **Taint Analysis** (source → sink)
-- **Inter-procedural Dataflow Tracking**
-- **Pointer & Alias Tracking (basic)**
-- **Fast AST-based scanning (tree-sitter)**
+### Detection Capabilities
 
-### Vulnerability Detection
+* Interprocedural taint tracking
+* Pointer & alias tracking
+* Function pointer resolution
+* AST-based analysis (tree-sitter)
 
-- Buffer Overflow (including pointer arithmetic)
-- Use-After-Free (UAF)
-- Double Free
-- Format String
-- Command Injection
+### Validation Engine
+
+* Taint-based validation (source → sink path)
+* Structural validation (unsafe APIs like strcpy/sprintf)
+* State-based validation (UAF / double free)
+* Feasible path analysis (constraint-aware CFG traversal)
+* Dominance analysis (guaranteed execution ordering)
+
+### Vulnerability Coverage
+
+* Buffer Overflow (including pointer arithmetic)
+* Use-After-Free (UAF)
+* Double Free
+* Format String
+* Command Injection
 
 ---
 
-## Installation
+## Quick Start (2 Minutes)
 
-### Option 1: Build from Source (Recommended)
+### Clone and Build
 
 ```bash
 git clone https://github.com/Tanish-26/sast-cli.git
 cd sast-cli/rust
 cargo build --release
-````
+```
 
-Binary location:
+Binary will be available at:
 
 ```bash
 target/release/sast-cli
@@ -45,16 +85,30 @@ export PATH=$PATH:$(pwd)/target/release
 
 ---
 
+### Run Your First Scan
+
+```bash
+sast-cli --table ./your_project
+```
+
+---
+
+## Installation Options
+
+### Option 1: Build from Source (Recommended)
+
+```bash
+git clone https://github.com/Tanish-26/sast-cli.git
+cd sast-cli/rust
+cargo build --release
+```
+
+---
+
 ### Option 2: Install Globally
 
 ```bash
 cargo install --path apps/sast-cli
-```
-
-Run:
-
-```bash
-sast-cli --help
 ```
 
 ---
@@ -75,32 +129,62 @@ sast-cli [OPTIONS] <PATHS>...
 
 ### Arguments
 
-| Argument     | Description                                       |
-| ------------ | ------------------------------------------------- |
-| `<PATHS>...` | Files or directories to scan (C, C++, JavaScript) |
+| Argument  | Description                  |
+| --------- | ---------------------------- |
+| `<PATHS>` | Files or directories to scan |
 
 ---
 
 ## CLI Options
 
-| Option              | Description                               |
-| ------------------- | ----------------------------------------- |
-| `--json`            | Output results in JSON format             |
-| `--summary`         | Show compact summary                      |
-| `--table`           | Human-readable table output (default)     |
-| `--report`          | Generate Markdown report                  |
-| `--baseline <FILE>` | Compare against baseline JSON             |
-| `--language <LANG>` | Force language (`c`, `cpp`, `javascript`) |
-| `-h, --help`        | Show help menu                            |
+### Output Formats
+
+| Option      | Description                     |
+| ----------- | ------------------------------- |
+| `--table`   | Human-readable output (default) |
+| `--json`    | Machine-readable JSON           |
+| `--report`  | Markdown report                 |
+| `--summary` | Compact summary                 |
+| `--sarif`   | SARIF output (GitHub Security)  |
 
 ---
 
-## Examples
+### Filtering & Validation
 
-### Scan a Directory
+| Option             | Description                   |
+| ------------------ | ----------------------------- |
+| `--validated-only` | Show only validated findings  |
+| `--min-confidence` | low | medium | high           |
+| `--show-path`      | Show validated execution path |
+| `--show-notes`     | Show validation reasoning     |
+
+---
+
+### Prioritization
+
+| Option                     | Description                     |
+| -------------------------- | ------------------------------- |
+| `--sort-by-exploitability` | Sort findings by exploitability |
+| `--top <N>`                | Show top N results              |
+
+---
+
+### Other
+
+| Option              | Description                           |
+| ------------------- | ------------------------------------- |
+| `--baseline <FILE>` | Compare against baseline              |
+| `--language <LANG>` | Force language (c | cpp | javascript) |
+| `--debug-validator` | Enable validator debug logs           |
+
+---
+
+## Common Usage
+
+### Scan Directory
 
 ```bash
-sast-cli --table ./project
+sast-cli ./project
 ```
 
 ---
@@ -108,12 +192,20 @@ sast-cli --table ./project
 ### Scan Single File
 
 ```bash
-sast-cli --json main.c
+sast-cli main.c
 ```
 
 ---
 
-### Generate Markdown Report
+### JSON Output
+
+```bash
+sast-cli --json ./project > results.json
+```
+
+---
+
+### Markdown Report
 
 ```bash
 sast-cli --report ./project > report.md
@@ -121,35 +213,64 @@ sast-cli --report ./project > report.md
 
 ---
 
-### Baseline Comparison
+## Advanced Usage
+
+### High Confidence Findings Only
 
 ```bash
-sast-cli --baseline baseline.json ./project
+sast-cli --min-confidence high ./project
 ```
 
 ---
 
-## Output Formats
+### Only Validated Vulnerabilities
 
-| Format     | Description             |
-| ---------- | ----------------------- |
-| `--table`  | Human-readable output   |
-| `--json`   | Machine-readable output |
-| `--report` | Markdown report         |
+```bash
+sast-cli --validated-only ./project
+```
 
 ---
 
-## Sample Output
+### Show Execution Path
 
-### Table Output
+```bash
+sast-cli --show-path ./project
+```
 
-```text
-RBOM: score=89 grade=C findings=16 exploitability=MEDIUM tainted=true
+Example:
 
-LINE    COL     SEV     RULE
-14      9       HIGH    c.buffer_overflow
-22      13      HIGH    c.use_after_free
-28      5       HIGH    c.double_free
+```
+free@file.c:20 → use@file.c:25
+```
+
+---
+
+### Show Validation Notes
+
+```bash
+sast-cli --show-notes ./project
+```
+
+Example notes:
+
+* dominance_confirmed
+* feasible_path_confirmed
+* structural_overflow_no_bounds_check
+
+---
+
+### Prioritize by Exploitability
+
+```bash
+sast-cli --sort-by-exploitability --top 10 ./project
+```
+
+---
+
+### Best Practice Scan
+
+```bash
+sast-cli --validated-only --min-confidence high --sort-by-exploitability ./project
 ```
 
 ---
@@ -167,124 +288,175 @@ docker pull tanishs26/sast-cli:latest
 ### Scan Current Directory
 
 ```bash
-docker run --rm -v $(pwd):/data tanishs26/sast-cli:latest --table .
+docker run --rm -v $(pwd):/scan tanishs26/sast-cli:latest --table /scan
 ```
 
 ---
 
-### Scan Specific Project
+### Scan External Project
 
 ```bash
 docker run --rm \
--v /path/to/project:/data \
+-v /absolute/path/to/project:/scan \
 tanishs26/sast-cli:latest \
---table /data
+--table /scan
 ```
 
 ---
 
-### Real Scan Example
+### Important Note
+
+Inside Docker, always scan `/scan`, not your local path.
+
+---
+
+## SARIF Integration (CI/CD)
 
 ```bash
-docker run --rm -v /path/to/xrt:/scan tanishs26/sast-cli:latest --table /scan
+sast-cli --sarif ./project > results.sarif
 ```
 
-Output:
+Upload to the GitHub Security tab.
 
-```text
-RBOM: score=89 grade=C findings=16 exploitability=MEDIUM tainted=true
-Summary: critical=0 high=4 medium=12 low=0
+---
+
+## Example Output
+
+Command
+```bash
+sast-cli --min-confidence high --show-path  ../../Scanner-test/
+```
+
+```bash
+Filtered results: confidence filter applied
+
+RBOM: score=89 grade=C findings=4 exploitability=MEDIUM tainted=true
+Summary: critical=0 high=4 medium=0 low=0 validated=4 high_confidence=4
 Top risks:
-  #1   HIGH      MEDIUM c.buffer_overflow          /data/testcase.c:14 (1×)
-  #2   HIGH      MEDIUM c.use_after_free           /data/testcase.c:22 (1×)
-  #3   HIGH      MEDIUM c.double_free              /data/testcase.c:28 (1×)
-  #4   HIGH      MEDIUM c.double_free              /data/testcase2.c:38 (1×)
-  #5   MEDIUM    MEDIUM c.buffer_overflow          /data/testcase.c:7 (1×)
+  #1   HIGH      MEDIUM c.use_after_free           ../../Scanner-test/testcase.c:22 (1×)
+  #2   HIGH      MEDIUM c.buffer_overflow          ../../Scanner-test/testcase.c:14 (1×)
+  #3   HIGH      MEDIUM c.double_free              ../../Scanner-test/testcase.c:28 (1×)
+  #4   HIGH      MEDIUM c.double_free              ../../Scanner-test/testcase2.c:38 (1×)
 
-#     OCC   LINE    COL     SEV        EXPLOIT    RULE                                DESC                          FILE
-1     1     14      9       HIGH       MEDIUM     c.buffer_overflow                   Unsafe copy/format            /data/testcase.c
-2     1     22      13      HIGH       MEDIUM     c.use_after_free                    Use after free                /data/testcase.c
-3     1     28      5       HIGH       MEDIUM     c.double_free                       Double free                   /data/testcase.c
-4     1     38      5       HIGH       MEDIUM     c.double_free                       Double free                   /data/testcase2.c
-5     1     7       5       MEDIUM     MEDIUM     c.buffer_overflow                   Unsafe copy/format            /data/testcase.c
-6     1     63      5       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase.c
-7     1     29      5       MEDIUM     MEDIUM     c.buffer_overflow                   Unsafe copy/format            /data/testcase2.c
-8     1     43      5       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase2.c
-9     1     28      5       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_extreme.c
-10    1     23      9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_ghost.c
-11    1     16      9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_ghost_in_machine.c
-12    1     25      5       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_god_mode.c
-13    1     9       9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_in_memory.c
-14    1     22      9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_in_memory.c
-15    1     25      9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_nuclear.c
-16    1     21      9       MEDIUM     MEDIUM     c.format_string                     Untrusted format string       /data/testcase_wash_taint.c
+#     OCC   LINE    COL     SEV        CONF    EXPLOIT    RULE                                DESC                          FILE
+1     1     22      13      HIGH  HIGH    HIGH  c.use_after_free                    Use after free                ../../Scanner-test/testcase.c
+2     1     14      9       HIGH  HIGH    HIGH  c.buffer_overflow                   Unsafe copy/format            ../../Scanner-test/testcase.c
+3     1     28      5       HIGH  HIGH    MEDIUM  c.double_free                       Double free                   ../../Scanner-test/testcase.c
+4     1     38      5       HIGH  HIGH    MEDIUM  c.double_free                       Double free                   ../../Scanner-test/testcase2.c
+
+#1 c.use_after_free (1 occurrences)
+  Why this matters: Using freed memory is undefined behavior and can lead to crashes, memory corruption, and exploitation.
+  Suggested fix: Do not use a pointer after `free()`. Clear it (`p = NULL`) and ensure ownership/lifetimes prevent reuse.
+  Primary: ../../Scanner-test/testcase.c:22:13
+  Exploitability: HIGH (90)
+  Path: free@../../Scanner-test/testcase.c:21:5 -> use@../../Scanner-test/testcase.c:22:5
+
+#2 c.buffer_overflow (1 occurrences)
+  Why this matters: Buffer overflows can corrupt memory, causing crashes and potentially enabling code execution or privilege escalation.
+  Suggested fix: Apply input validation and safer APIs for this pattern.
+  Primary: ../../Scanner-test/testcase.c:14:9
+  Exploitability: HIGH (80)
+  Path: memset@../../Scanner-test/testcase.c:14:9
+
+#3 c.double_free (1 occurrences)
+  Why this matters: Freeing the same pointer twice is undefined behavior and can corrupt allocator state, sometimes enabling exploitation.
+  Suggested fix: Ensure each allocation is freed exactly once. Clear pointers after free (`p = NULL`) and avoid duplicated ownership.
+  Primary: ../../Scanner-test/testcase.c:28:5
+  Exploitability: MEDIUM (70)
+  Path: free@../../Scanner-test/testcase.c:27:5 -> free@../../Scanner-test/testcase.c:28:5
+
+#4 c.double_free (1 occurrences)
+  Why this matters: Freeing the same pointer twice is undefined behavior and can corrupt allocator state, sometimes enabling exploitation.
+  Suggested fix: Ensure each allocation is freed exactly once. Clear pointers after free (`p = NULL`) and avoid duplicated ownership.
+  Primary: ../../Scanner-test/testcase2.c:38:5
+  Exploitability: MEDIUM (70)
+  Path: free@../../Scanner-test/testcase2.c:36:5 -> free@../../Scanner-test/testcase2.c:38:5
+
 ```
 
 ---
 
-## Example Vulnerability
+## Output Meaning
 
-```
-Path: buf → buf+sz → sprintf
-Type: Pointer arithmetic buffer overflow
-```
+| Field   | Description                      |
+| ------- | -------------------------------- |
+| SEV     | Severity (impact)                |
+| CONF    | Confidence (validation strength) |
+| EXPLOIT | Exploitability likelihood        |
 
 ---
 
 ## Architecture
 
-| Component  | Description                        |
-| ---------- | ---------------------------------- |
-| `sast-c`   | C/C++ analysis engine              |
-| `sast-js`  | JavaScript analysis (experimental) |
-| `rbom`     | Risk scoring engine                |
-| `sast-cli` | CLI interface                      |
-| `sast-api` | REST API service                   |
+```
+sast-c          C/C++ analysis engine
+sast-js         JavaScript engine (experimental)
+sast-validator  multi-stage validation engine
+rbom            risk scoring
+sast-cli        CLI interface
+sast-api        REST API (in progress)
+```
+
+---
+
+## Version v1.2.0 Highlights
+
+* Dominance-aware validation (CFG dominators)
+* Feasible-path validation (constraint-based)
+* Multi-mode validation:
+
+  * Taint
+  * Structural
+  * State-based
+  * Path-based
+  * Dominance
+* SARIF output support
+* Improved confidence scoring
+* Reduced false positives
+
+---
+
+## Use Cases
+
+* Bug bounty research
+* Kernel/driver auditing
+* CI/CD security scanning
+* Secure code review
+* Large-scale codebase analysis
 
 ---
 
 ## Known Limitations
 
-* Function pointer resolution (planned)
-* Advanced alias (points-to) analysis (planned)
-* SMT-based constraint solving (planned)
+* Advanced SMT solving (planned)
+* Deep points-to analysis (planned)
+* Full symbolic execution (future work)
 
 ---
 
 ## Roadmap
 
-* [ ] Function pointer resolution
-* [ ] SARIF output (GitHub Security tab)
-* [ ] AI-based vulnerability explanation
-* [ ] CI/CD pipeline integration
-* [ ] Web dashboard
-
----
-
-## Local Development
-
-```bash
-cargo run -p sast-cli -- ./test.c --json
-```
+* SARIF GitHub native integration
+* AI-based vulnerability explanation
+* CI/CD automation
+* Web dashboard
 
 ---
 
 ## Author
 
-**Tanish (tanishs26)**
+Tanish (tanishs26)
 Security Researcher | Bug Bounty Hunter
 
 ---
 
-## ⭐ Support
+## Support
 
 If you find this project useful:
 
-* ⭐ Star the repository
+* Star the repository
 * Use the Docker image
 * Contribute improvements
 
 ---
-
-
 
