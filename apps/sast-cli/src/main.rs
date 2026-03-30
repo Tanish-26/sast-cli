@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use sast_core::{poc, Language};
+use sast_core::{poc, Confidence, Language};
 use serde_json::Value;
 
 #[derive(Debug, Parser)]
@@ -29,6 +29,10 @@ struct Args {
     #[arg(long, conflicts_with_all = ["json", "summary", "table"])]
     report: bool,
 
+    /// Emit SARIF v2.1.0 (GitHub code scanning compatible)
+    #[arg(long, conflicts_with_all = ["json", "summary", "table", "report", "baseline"])]
+    sarif: bool,
+
     /// Compare against a baseline JSON file (also updates baseline to current scan)
     #[arg(long)]
     baseline: Option<PathBuf>,
@@ -36,13 +40,45 @@ struct Args {
     /// Force language for single-file scans: javascript|c|cpp
     #[arg(long)]
     language: Option<String>,
+
+    /// Show only validated, high-confidence findings
+    #[arg(long)]
+    validated_only: bool,
+
+    /// Minimum confidence to include: low|medium|high
+    #[arg(long, value_parser = ["low", "medium", "high"])]
+    min_confidence: Option<String>,
+
+    /// Show dataflow path (table/report output)
+    #[arg(long)]
+    show_path: bool,
+
+    /// Show validation notes (table/report output)
+    #[arg(long)]
+    show_notes: bool,
+
+    /// Sort by exploitability score descending
+    #[arg(long)]
+    sort_by_exploitability: bool,
+
+    /// Return only the top N findings after sorting/filtering
+    #[arg(long)]
+    top: Option<usize>,
+
+    /// Debug validator (prints CFG/path reasoning to stderr)
+    #[arg(long)]
+    debug_validator: bool,
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    if args.debug_validator {
+        std::env::set_var("SAST_VALIDATOR_DEBUG", "1");
+    }
 
     let mut findings = Vec::new();
     let mut files = Vec::new();
+    let mut ast_map: sast_validator::AstMap = Default::default();
 
     for p in &args.paths {
         if p.is_dir() {
@@ -91,6 +127,11 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
+
+        if let Some(ast) = sast_validator::parse_file(&path, &src, lang.clone()) {
+            ast_map.insert(path.clone(), ast);
+        }
+
         let mut file_findings = match lang {
             Language::JavaScript => match sast_js::scan_eval_taint(&src, &path) {
                 Ok(v) => v,
@@ -110,9 +151,28 @@ fn main() -> ExitCode {
         findings.append(&mut file_findings);
     }
 
+    let (c_family, mut non_c_family): (Vec<_>, Vec<_>) =
+        findings.into_iter().partition(|f| is_c_family_path(&f.location.path));
+    let call_graph = sast_validator::build_call_graph(&ast_map);
+    let mut findings = sast_validator::validate_findings(c_family, &ast_map, &call_graph);
+    findings.append(&mut non_c_family);
+
+    attach_exploitability(&mut findings);
+
+    let before_filter = findings.len();
+    let mut filter_notes: Vec<&'static str> = Vec::new();
+    apply_filters(&mut findings, &args, &mut filter_notes);
+
     poc::attach(&mut findings);
     detect_exploit_chains(&mut findings);
-    sort_and_rank(&mut findings);
+    sort_and_rank(&mut findings, args.sort_by_exploitability);
+
+    if let Some(n) = args.top {
+        if findings.len() > n {
+            findings.truncate(n);
+            filter_notes.push("top_n");
+        }
+    }
 
     let rbom = rbom::score(&findings);
 
@@ -151,10 +211,16 @@ fn main() -> ExitCode {
     }
 
     if args.json {
-        let out = serde_json::json!({
-            "findings": findings,
-            "rbom": rbom,
-        });
+        let out = json_output(&findings, &rbom);
+        match serde_json::to_string_pretty(&out) {
+            Ok(s) => println!("{s}"),
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(2);
+            }
+        }
+    } else if args.sarif {
+        let out = sarif_output(&findings);
         match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
             Err(e) => {
@@ -163,15 +229,38 @@ fn main() -> ExitCode {
             }
         }
     } else if args.report {
-        print_report(&rbom, &findings);
+        if before_filter != findings.len() && !filter_notes.is_empty() {
+            println!("Filtered results: {}", filter_message(&filter_notes));
+            println!();
+        }
+        print_report(&rbom, &findings, args.show_path, args.show_notes);
     } else if args.summary {
+        if before_filter != findings.len() && !filter_notes.is_empty() {
+            println!("Filtered results: {}", filter_message(&filter_notes));
+        }
         print_summary(&rbom, &findings);
     } else {
         // Default: table output (or explicit --table).
-        print_table(&rbom, &findings);
+        if before_filter != findings.len() && !filter_notes.is_empty() {
+            println!("Filtered results: {}", filter_message(&filter_notes));
+            println!();
+        }
+        print_table(&rbom, &findings, args.show_path, args.show_notes);
     }
 
     if findings.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+
+fn is_c_family_path(path: &str) -> bool {
+    let p = path.to_ascii_lowercase();
+    p.ends_with(".c")
+        || p.ends_with(".h")
+        || p.ends_with(".cc")
+        || p.ends_with(".cpp")
+        || p.ends_with(".cxx")
+        || p.ends_with(".hh")
+        || p.ends_with(".hpp")
+        || p.ends_with(".hxx")
 }
 
 fn infer_language(path: &PathBuf, forced: Option<&str>) -> Option<Language> {
@@ -198,12 +287,20 @@ fn print_summary(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
     let mut medium = 0usize;
     let mut high = 0usize;
     let mut critical = 0usize;
+    let mut validated = 0usize;
+    let mut high_confidence = 0usize;
     for f in findings {
         match f.severity {
             sast_core::Severity::Low => low += 1,
             sast_core::Severity::Medium => medium += 1,
             sast_core::Severity::High => high += 1,
             sast_core::Severity::Critical => critical += 1,
+        }
+        if f.confidence == Some(Confidence::High) {
+            high_confidence += 1;
+        }
+        if is_validated(f) {
+            validated += 1;
         }
     }
 
@@ -213,12 +310,16 @@ fn print_summary(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
         rbom.score, rbom.grade, rbom.findings, exploit, rbom.tainted
     );
     println!(
+        "Validation: validated={} high_confidence={}",
+        validated, high_confidence
+    );
+    println!(
         "Findings: critical={} high={} medium={} low={}",
         critical, high, medium, low
     );
 }
 
-fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
+fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding], show_path: bool, show_notes: bool) {
     use std::io::IsTerminal;
 
     let use_color = std::io::stdout().is_terminal() && std::env::var("NO_COLOR").is_err();
@@ -234,9 +335,10 @@ fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
     }
 
     let (critical, high, medium, low) = severity_counts(findings);
+    let (validated, high_confidence) = validation_counts(findings);
     println!(
-        "Summary: critical={} high={} medium={} low={}",
-        critical, high, medium, low
+        "Summary: critical={} high={} medium={} low={} validated={} high_confidence={}",
+        critical, high, medium, low, validated, high_confidence
     );
 
     let groups = group_findings(findings);
@@ -260,36 +362,37 @@ fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
     println!();
 
     println!(
-        "{:<4}  {:<4}  {:<6}  {:<6}  {:<9}  {:<9}  {:<34}  {:<28}  {}",
-        "#", "OCC", "LINE", "COL", "SEV", "EXPLOIT", "RULE", "DESC", "FILE"
+        "{:<4}  {:<4}  {:<6}  {:<6}  {:<9}  {:<6}  {:<9}  {:<34}  {:<28}  {}",
+        "#", "OCC", "LINE", "COL", "SEV", "CONF", "EXPLOIT", "RULE", "DESC", "FILE"
     );
 
     for (i, g) in groups.iter().enumerate() {
         let f = &g.primary;
-        let risk = rbom::score_finding(f);
         let sev = severity_str(f.severity);
-        let exploit = format!("{:?}", risk.exploitability).to_ascii_uppercase();
+        let conf = confidence_str(f);
+        let exploit = f
+            .exploitability_level
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_ascii_uppercase();
 
         let sev_disp = if use_color {
             color_severity(sev, f.severity)
         } else {
             sev.to_string()
         };
-        let exploit_disp = if use_color {
-            color_exploitability(&exploit, risk.exploitability)
-        } else {
-            exploit.clone()
-        };
+        let exploit_disp = if use_color { color_exploitability_level(&exploit) } else { exploit.clone() };
 
         let file = shorten_path(&f.location.path, 52);
         let desc = shorten_text(rule_description(&f.rule_id), 28);
         println!(
-            "{:<4}  {:<4}  {:<6}  {:<6}  {:<9}  {:<9}  {:<34}  {:<28}  {}",
+            "{:<4}  {:<4}  {:<6}  {:<6}  {:<9}  {:<6}  {:<9}  {:<34}  {:<28}  {}",
             i + 1,
             g.occurrences,
             f.location.line,
             f.location.column,
             sev_disp,
+            conf,
             exploit_disp,
             f.rule_id,
             desc,
@@ -319,8 +422,26 @@ fn print_table(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
         if let Some(chain) = &f.exploit_chain {
             println!("  Exploit chain: {}", chain.join(" -> "));
         }
-        if let Some(p) = &f.path {
-            println!("  Path: {}", p.join(" -> "));
+        if let Some(score) = f.exploitability_score {
+            let lvl = f.exploitability_level.as_deref().unwrap_or("unknown");
+            println!("  Exploitability: {} ({score})", lvl.to_ascii_uppercase());
+        }
+        if show_path {
+            if let Some(p) = &f.validated_path {
+                println!("  Path: {}", p.join(" -> "));
+            } else if let Some(p) = &f.path {
+                println!("  Path: {}", p.join(" -> "));
+            }
+        }
+        if show_notes {
+            if let Some(ns) = &f.validation_notes {
+                if !ns.is_empty() {
+                    println!("  Notes:");
+                    for n in ns {
+                        println!("    - {}", n);
+                    }
+                }
+            }
         }
         println!();
     }
@@ -335,13 +456,14 @@ fn severity_str(s: sast_core::Severity) -> &'static str {
     }
 }
 
-fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
+fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding], show_path: bool, show_notes: bool) {
     let exploit = format!("{:?}", rbom.exploitability).to_ascii_uppercase();
 
     let mut low = 0usize;
     let mut medium = 0usize;
     let mut high = 0usize;
     let mut critical = 0usize;
+    let (validated, high_confidence) = validation_counts(findings);
     for f in findings {
         match f.severity {
             sast_core::Severity::Low => low += 1,
@@ -357,6 +479,7 @@ fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
         "- RBOM: score={} grade={} findings={} exploitability={} tainted={}",
         rbom.score, rbom.grade, rbom.findings, exploit, rbom.tainted
     );
+    println!("- Validation: validated={} high_confidence={}", validated, high_confidence);
     println!(
         "- Severities: critical={} high={} medium={} low={}\n",
         critical, high, medium, low
@@ -391,9 +514,12 @@ fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
     println!("## Findings\n");
     for (i, g) in groups.iter().enumerate() {
         let f = &g.primary;
-        let risk = rbom::score_finding(f);
         let sev = severity_str(f.severity);
-        let exp = format!("{:?}", risk.exploitability).to_ascii_uppercase();
+        let exp = f
+            .exploitability_level
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_ascii_uppercase();
 
         println!(
             "### {}. `{}` ({}, {} occurrences)\n",
@@ -416,7 +542,16 @@ fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
             }
         }
         println!("- Exploitability: {}", exp);
-        println!("- Tainted (risk): {}", risk.tainted);
+        if let Some(score) = f.exploitability_score {
+            println!("- Exploitability score: {}", score);
+        }
+        println!("- Tainted (risk): {}", f.tainted || f.implicit_risk);
+        if let Some(c) = f.confidence {
+            println!("- Confidence: {}", format!("{c:?}").to_ascii_uppercase());
+        }
+        if is_validated(f) {
+            println!("- Validated: true");
+        }
         if f.conditional {
             println!("- Conditional: true");
         }
@@ -461,9 +596,26 @@ fn print_report(rbom: &rbom::RbomScore, findings: &[sast_core::Finding]) {
         }
         println!();
 
-        if let Some(p) = &f.path {
-            println!("**Dataflow Path**");
-            println!("`{}`\n", p.join(" -> "));
+        if show_notes {
+            if let Some(ns) = &f.validation_notes {
+                if !ns.is_empty() {
+                    println!("**Validation Notes**");
+                    for n in ns {
+                        println!("- {}", n);
+                    }
+                    println!();
+                }
+            }
+        }
+
+        if show_path {
+            if let Some(p) = &f.validated_path {
+                println!("**Validated Path**");
+                println!("`{}`\n", p.join(" -> "));
+            } else if let Some(p) = &f.path {
+                println!("**Dataflow Path**");
+                println!("`{}`\n", p.join(" -> "));
+            }
         }
 
         if let Some(snippet) = &f.snippet {
@@ -884,24 +1036,7 @@ fn color_severity(label: &str, sev: sast_core::Severity) -> String {
     format!("{prefix}{label}{suffix}")
 }
 
-fn color_exploitability(label: &str, exp: rbom::Exploitability) -> String {
-    let (prefix, suffix) = match exp {
-        rbom::Exploitability::High => ("\x1b[1;31m", "\x1b[0m"),
-        rbom::Exploitability::Medium => ("\x1b[1;33m", "\x1b[0m"),
-        rbom::Exploitability::Low => ("\x1b[32m", "\x1b[0m"),
-    };
-    format!("{prefix}{label}{suffix}")
-}
-
-fn sort_and_rank(findings: &mut Vec<sast_core::Finding>) {
-    fn exp_rank(e: rbom::Exploitability) -> u8 {
-        match e {
-            rbom::Exploitability::High => 2,
-            rbom::Exploitability::Medium => 1,
-            rbom::Exploitability::Low => 0,
-        }
-    }
-
+fn sort_and_rank(findings: &mut Vec<sast_core::Finding>, sort_by_exploitability: bool) {
     fn sev_rank(s: sast_core::Severity) -> u8 {
         match s {
             sast_core::Severity::Critical => 3,
@@ -911,46 +1046,321 @@ fn sort_and_rank(findings: &mut Vec<sast_core::Finding>) {
         }
     }
 
-    #[derive(Clone, Copy, Debug)]
-    struct Key {
-        chain: u8,
-        exp: u8,
-        sev: u8,
-        tainted: u8,
-    }
+    findings.sort_by(|a, b| {
+        let ascore = a.exploitability_score.unwrap_or(0);
+        let bscore = b.exploitability_score.unwrap_or(0);
+        let aconf = conf_rank(a.confidence);
+        let bconf = conf_rank(b.confidence);
+        let ataint = if a.tainted || a.implicit_risk { 1 } else { 0 };
+        let btaint = if b.tainted || b.implicit_risk { 1 } else { 0 };
 
-    let mut keyed: Vec<(Key, sast_core::Finding)> = findings
-        .drain(..)
-        .map(|f| {
-            let s = rbom::score_finding(&f);
-            let chain = f.exploit_chain.as_ref().map(|c| c.len()).unwrap_or(0).min(255) as u8;
-            let key = Key {
-                chain,
-                exp: exp_rank(s.exploitability),
-                sev: sev_rank(f.severity),
-                tainted: if s.tainted { 1 } else { 0 },
-            };
-            (key, f)
-        })
-        .collect();
-
-    keyed.sort_by(|(ka, fa), (kb, fb)| {
-        // exploit chains first, then exploitability (desc), severity (desc), tainted first (desc)
-        kb.chain
-            .cmp(&ka.chain)
-            .then_with(|| kb.exp.cmp(&ka.exp))
-            .then_with(|| kb.sev.cmp(&ka.sev))
-            .then_with(|| kb.tainted.cmp(&ka.tainted))
-            .then_with(|| fa.location.path.cmp(&fb.location.path))
-            .then_with(|| fa.location.line.cmp(&fb.location.line))
-            .then_with(|| fa.location.column.cmp(&fb.location.column))
-            .then_with(|| fa.rule_id.cmp(&fb.rule_id))
+        if sort_by_exploitability {
+            bscore
+                .cmp(&ascore)
+                .then_with(|| sev_rank(b.severity).cmp(&sev_rank(a.severity)))
+                .then_with(|| btaint.cmp(&ataint))
+                .then_with(|| bconf.cmp(&aconf))
+        } else {
+            sev_rank(b.severity)
+                .cmp(&sev_rank(a.severity))
+                .then_with(|| bscore.cmp(&ascore))
+                .then_with(|| btaint.cmp(&ataint))
+                .then_with(|| bconf.cmp(&aconf))
+        }
+        .then_with(|| a.location.path.cmp(&b.location.path))
+        .then_with(|| a.location.line.cmp(&b.location.line))
+        .then_with(|| a.location.column.cmp(&b.location.column))
+        .then_with(|| a.rule_id.cmp(&b.rule_id))
     });
 
-    *findings = keyed.into_iter().map(|(_, f)| f).collect();
     for (i, f) in findings.iter_mut().enumerate() {
         f.rank = i + 1;
     }
+}
+
+fn conf_rank(c: Option<Confidence>) -> u8 {
+    match c.unwrap_or(Confidence::Medium) {
+        Confidence::Low => 0,
+        Confidence::Medium => 1,
+        Confidence::High => 2,
+    }
+}
+
+fn confidence_str(f: &sast_core::Finding) -> &'static str {
+    match f.confidence.unwrap_or(Confidence::Medium) {
+        Confidence::Low => "LOW",
+        Confidence::Medium => "MED",
+        Confidence::High => "HIGH",
+    }
+}
+
+fn is_validated(f: &sast_core::Finding) -> bool {
+    f.validated
+}
+
+fn validation_counts(findings: &[sast_core::Finding]) -> (usize, usize) {
+    let mut validated = 0usize;
+    let mut high_conf = 0usize;
+    for f in findings {
+        if f.confidence == Some(Confidence::High) {
+            high_conf += 1;
+        }
+        if is_validated(f) {
+            validated += 1;
+        }
+    }
+    (validated, high_conf)
+}
+
+fn color_exploitability_level(level: &str) -> String {
+    let (prefix, suffix) = match level {
+        "HIGH" => ("\x1b[1;31m", "\x1b[0m"),
+        "MEDIUM" => ("\x1b[1;33m", "\x1b[0m"),
+        "LOW" => ("\x1b[32m", "\x1b[0m"),
+        _ => ("\x1b[0m", "\x1b[0m"),
+    };
+    format!("{prefix}{level}{suffix}")
+}
+
+fn attach_exploitability(findings: &mut [sast_core::Finding]) {
+    for f in findings {
+        let (score, level) = exploitability_for(f);
+        f.exploitability_score = Some(score);
+        f.exploitability_level = Some(level);
+    }
+}
+
+fn exploitability_for(f: &sast_core::Finding) -> (u8, String) {
+    let mut score: i32 = 0;
+    match f.rule_id.as_str() {
+        rid if rid.starts_with("c.buffer_overflow") => {
+            score += 30;
+            if rid.contains("pointer_arithmetic") || f.implicit_risk {
+                score += 30;
+            }
+            if !f.guarded {
+                score += 20;
+            }
+            if f.tainted {
+                score += 20;
+            }
+        }
+        "c.format_string" => {
+            score += 20;
+            if f.tainted {
+                score += 40;
+            }
+            if f.snippet.as_deref().unwrap_or("").contains("%n") {
+                score += 30;
+            }
+        }
+        "c.command_injection" => {
+            score += 50;
+            if f.tainted {
+                score += 30;
+            }
+        }
+        "c.use_after_free" => {
+            score += 40;
+            score += 50;
+            if f.path.as_ref().is_some_and(|p| p.len() >= 4) {
+                score += 20;
+            }
+        }
+        "c.double_free" => {
+            score += 40;
+            score += 30;
+            if f.path.as_ref().is_some_and(|p| p.len() >= 4) {
+                score += 20;
+            }
+        }
+        _ => {
+            score += 10;
+            if f.implicit_risk {
+                score += 10;
+            }
+            if f.tainted {
+                score += 10;
+            }
+        }
+    }
+
+    if score < 0 {
+        score = 0;
+    }
+    if score > 100 {
+        score = 100;
+    }
+    let level = match score {
+        0..=30 => "low",
+        31..=70 => "medium",
+        _ => "high",
+    }
+    .to_string();
+    (score as u8, level)
+}
+
+fn apply_filters(findings: &mut Vec<sast_core::Finding>, args: &Args, notes: &mut Vec<&'static str>) {
+    let before = findings.len();
+
+    if args.validated_only {
+        // TRUE validated findings only: a concrete reconstructed path exists.
+        findings.retain(|f| is_validated(f));
+        notes.push("validated_only");
+    }
+
+    if let Some(min) = args.min_confidence.as_deref() {
+        let min_rank = match min {
+            "low" => 0u8,
+            "medium" => 1u8,
+            "high" => 2u8,
+            _ => 0u8,
+        };
+        findings.retain(|f| conf_rank(f.confidence) >= min_rank);
+        notes.push("min_confidence");
+
+        // Extra false-positive trimming only at the strictest setting.
+        if min == "high" {
+            findings.retain(|f| !(f.confidence == Some(Confidence::Low) && f.validated_path.is_none()));
+            notes.push("drop_low_no_path");
+        }
+    }
+
+    if std::env::var("SAST_FILTER_DEBUG").ok().as_deref() == Some("1")
+        && (args.validated_only || args.min_confidence.is_some())
+    {
+        eprintln!("Filter debug: findings {} -> {}", before, findings.len());
+    }
+}
+
+fn filter_message(notes: &[&'static str]) -> String {
+    if notes.contains(&"validated_only") {
+        return "showing validated findings only".to_string();
+    }
+    if notes.contains(&"min_confidence") {
+        return "confidence filter applied".to_string();
+    }
+    if notes.contains(&"top_n") {
+        return "top-N filter applied".to_string();
+    }
+    if notes.contains(&"drop_low_no_path") {
+        return "dropping low-confidence unvalidated findings".to_string();
+    }
+    "filters applied".to_string()
+}
+
+fn json_output(findings: &[sast_core::Finding], rbom: &rbom::RbomScore) -> serde_json::Value {
+    let (validated, high_confidence) = validation_counts(findings);
+    let out_findings: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            let validated_flag = f.validated;
+            serde_json::json!({
+                "rule": f.rule_id,
+                "severity": severity_str(f.severity).to_ascii_lowercase(),
+                "confidence": f.confidence.map(|c| format!("{c:?}").to_ascii_lowercase()).unwrap_or("unknown".to_string()),
+                "validated": validated_flag,
+                "exploitability_score": f.exploitability_score.unwrap_or(0),
+                "exploitability_level": f.exploitability_level.clone().unwrap_or_else(|| "unknown".to_string()),
+                "path": f.validated_path.clone().or_else(|| f.path.clone()).unwrap_or_default(),
+                "notes": f.validation_notes.clone().unwrap_or_default(),
+                "location": f.location,
+                "snippet": f.snippet,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "findings": out_findings,
+        "summary": {
+            "findings": findings.len(),
+            "validated": validated,
+            "high_confidence": high_confidence,
+        },
+        "rbom": rbom,
+    })
+}
+
+fn sarif_output(findings: &[sast_core::Finding]) -> serde_json::Value {
+    use std::collections::BTreeMap;
+
+    // Build a stable rule list and ruleIndex mapping for SARIF.
+    let mut rule_map: BTreeMap<String, usize> = BTreeMap::new();
+    let mut rules: Vec<serde_json::Value> = Vec::new();
+    for f in findings {
+        if rule_map.contains_key(&f.rule_id) {
+            continue;
+        }
+        let idx = rules.len();
+        rule_map.insert(f.rule_id.clone(), idx);
+        rules.push(serde_json::json!({
+            "id": f.rule_id,
+            "name": f.rule_id,
+            "shortDescription": { "text": rule_description(&f.rule_id) },
+        }));
+    }
+
+    let results: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            let level = match f.severity {
+                sast_core::Severity::Critical | sast_core::Severity::High => "error",
+                sast_core::Severity::Medium => "warning",
+                sast_core::Severity::Low => "note",
+            };
+            let conf = f
+                .confidence
+                .map(|c| format!("{c:?}").to_ascii_lowercase())
+                .unwrap_or_else(|| "unknown".to_string());
+            let sev = severity_str(f.severity).to_ascii_lowercase();
+            let exp_score = f.exploitability_score.unwrap_or(0);
+            let exp_level = f
+                .exploitability_level
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let rule_index = rule_map.get(&f.rule_id).copied();
+
+            serde_json::json!({
+                "ruleId": f.rule_id,
+                "ruleIndex": rule_index,
+                "level": level,
+                "kind": "fail",
+                "message": { "text": f.message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": f.location.path },
+                        "region": {
+                            "startLine": f.location.line,
+                            "startColumn": f.location.column
+                        }
+                    }
+                }],
+                "properties": {
+                    "severity": sev,
+                    "confidence": conf,
+                    "validated": f.validated,
+                    "exploitabilityScore": exp_score,
+                    "exploitabilityLevel": exp_level
+                }
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "sast-cli",
+                    "informationUri": "https://github.com/openai/codex",
+                    "rules": rules
+                }
+            },
+            "results": results
+        }]
+    })
 }
 
 #[derive(Debug, Clone)]

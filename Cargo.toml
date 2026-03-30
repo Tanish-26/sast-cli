@@ -4,6 +4,7 @@ members = [
   "crates/sast-core",
   "crates/sast-c",
   "crates/sast-js",
+  "crates/sast-validator",
   "crates/rbom",
   "apps/sast-cli",
   "services/sast-api",

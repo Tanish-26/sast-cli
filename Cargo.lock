@@ -578,6 +578,7 @@ dependencies = [
  "sast-c",
  "sast-core",
  "sast-js",
+ "sast-validator",
  "serde_json",
  "walkdir",
 ]
@@ -596,6 +597,17 @@ dependencies = [
  "sast-core",
  "tree-sitter",
  "tree-sitter-javascript",
+]
+
+[[package]]
+name = "sast-validator"
+version = "0.1.0"
+dependencies = [
+ "sast-c",
+ "sast-core",
+ "tree-sitter",
+ "tree-sitter-c",
+ "tree-sitter-cpp",
 ]
 
 [[package]]

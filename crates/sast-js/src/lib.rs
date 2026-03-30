@@ -189,6 +189,12 @@ fn scan_expr(source: &str, node: Node, path: &str, findings: &mut Vec<Finding>, 
                     poc: None,
                     source_location: None,
                     path: None,
+                    validated: false,
+                    confidence: None,
+                    validated_path: None,
+                    validation_notes: None,
+                    exploitability_score: None,
+                    exploitability_level: None,
                     exploit_chain: None,
                 });
             }

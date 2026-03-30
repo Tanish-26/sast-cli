@@ -11,6 +11,14 @@ pub enum Severity {
     Critical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    Low,
+    Medium,
+    High,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct VulnContext {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,6 +74,18 @@ pub struct Finding {
     pub source_location: Option<Location>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Vec<String>>,
+    #[serde(default)]
+    pub validated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validated_path: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_notes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploitability_score: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploitability_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exploit_chain: Option<Vec<String>>,
 }
