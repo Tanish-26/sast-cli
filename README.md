@@ -4,6 +4,12 @@ sast-cli is a high-performance static analysis (SAST) engine written in Rust for
 
 It combines interprocedural dataflow analysis with multi-stage validation (CFG, feasible path, dominance, and state tracking) to significantly reduce false positives while maintaining high detection coverage.
 
+## Documentation
+
+Comprehensive documentation covering usage, architecture, and validation engine:
+
+👉 **https://tanish-26.gitbook.io/Sast-cli**
+
 ---
 
 ## Overview
