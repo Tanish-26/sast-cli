@@ -7,7 +7,7 @@ use sast_core::{poc, Confidence, Language};
 use serde_json::Value;
 
 #[derive(Debug, Parser)]
-#[command(name = "sast-cli")]
+#[command(name = "xrayflow")]
 struct Args {
     /// Files/directories to scan (JavaScript, C, C++)
     #[arg(required = true)]
@@ -1353,7 +1353,7 @@ fn sarif_output(findings: &[sast_core::Finding]) -> serde_json::Value {
         "runs": [{
             "tool": {
                 "driver": {
-                    "name": "sast-cli",
+                    "name": "xrayflow",
                     "informationUri": "https://github.com/openai/codex",
                     "rules": rules
                 }

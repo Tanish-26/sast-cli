@@ -6,7 +6,7 @@ members = [
   "crates/sast-js",
   "crates/sast-validator",
   "crates/rbom",
-  "apps/sast-cli",
+  "apps/xrayflow",
   "services/sast-api",
   "services/rbom-api",
 ]

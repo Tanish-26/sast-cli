@@ -31,8 +31,8 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 
 # Build binary (strip for smaller size 🔥)
-RUN cargo build --release -p sast-cli && \
-    strip target/release/sast-cli
+RUN cargo build --release -p xrayflow && \
+    strip target/release/xrayflow
 
 
 # ---------- STAGE 3: MINIMAL RUNTIME ----------
@@ -47,10 +47,10 @@ WORKDIR /scan
 RUN useradd -m appuser
 
 # Copy only binary
-COPY --from=builder /app/target/release/sast-cli /usr/local/bin/sast-cli
+COPY --from=builder /app/target/release/xrayflow /usr/local/bin/xrayflow
 
-RUN chmod +x /usr/local/bin/sast-cli
+RUN chmod +x /usr/local/bin/xrayflow
 
 USER appuser
 
-ENTRYPOINT ["sast-cli"]
+ENTRYPOINT ["xrayflow"]

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # sast-cli — Advanced Static Analysis Engine for C/C++
+=======
+# XrayFlow — Exploit-Aware Static Analysis Engine
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
 sast-cli is a high-performance static analysis (SAST) engine written in Rust for detecting and validating memory corruption and input-driven vulnerabilities in C/C++ codebases.
 
@@ -72,15 +76,15 @@ This ensures reported vulnerabilities are not just possible, but **actually expl
 ### Clone and Build
 
 ```bash
-git clone https://github.com/Tanish-26/sast-cli.git
-cd sast-cli/rust
+git clone https://github.com/Tanish-26/xrayflow.git
+cd xrayflow/rust
 cargo build --release
 ```
 
 Binary will be available at:
 
 ```bash
-target/release/sast-cli
+target/release/xrayflow
 ```
 
 (Optional) Add to PATH:
@@ -114,15 +118,24 @@ cargo build --release
 ### Option 2: Install Globally
 
 ```bash
-cargo install --path apps/sast-cli
+cargo install --path apps/xrayflow
 ```
 
+<<<<<<< HEAD
+=======
+Run:
+
+```bash
+xrayflow --help
+```
+
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ---
 
 ### Option 3: Run Without Installing
 
 ```bash
-cargo run -p sast-cli -- ./test.c --json
+cargo run -p xrayflow -- ./test.c --json
 ```
 
 ---
@@ -130,7 +143,7 @@ cargo run -p sast-cli -- ./test.c --json
 ## CLI Usage
 
 ```bash
-sast-cli [OPTIONS] <PATHS>...
+xrayflow [OPTIONS] <PATHS>...
 ```
 
 ### Arguments
@@ -190,7 +203,11 @@ sast-cli [OPTIONS] <PATHS>...
 ### Scan Directory
 
 ```bash
+<<<<<<< HEAD
 sast-cli ./project
+=======
+xrayflow --table ./project
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -198,7 +215,11 @@ sast-cli ./project
 ### Scan Single File
 
 ```bash
+<<<<<<< HEAD
 sast-cli main.c
+=======
+xrayflow --json main.c
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -214,7 +235,7 @@ sast-cli --json ./project > results.json
 ### Markdown Report
 
 ```bash
-sast-cli --report ./project > report.md
+xrayflow --report ./project > report.md
 ```
 
 ---
@@ -224,7 +245,11 @@ sast-cli --report ./project > report.md
 ### High Confidence Findings Only
 
 ```bash
+<<<<<<< HEAD
 sast-cli --min-confidence high ./project
+=======
+xrayflow --baseline baseline.json ./project
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -286,7 +311,7 @@ sast-cli --validated-only --min-confidence high --sort-by-exploitability ./proje
 ### Pull Image
 
 ```bash
-docker pull tanishs26/sast-cli:latest
+docker pull tanishs26/xrayflow:latest
 ```
 
 ---
@@ -294,7 +319,11 @@ docker pull tanishs26/sast-cli:latest
 ### Scan Current Directory
 
 ```bash
+<<<<<<< HEAD
 docker run --rm -v $(pwd):/scan tanishs26/sast-cli:latest --table /scan
+=======
+docker run --rm -v $(pwd):/data tanishs26/xrayflow:latest --table .
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -303,9 +332,15 @@ docker run --rm -v $(pwd):/scan tanishs26/sast-cli:latest --table /scan
 
 ```bash
 docker run --rm \
+<<<<<<< HEAD
 -v /absolute/path/to/project:/scan \
 tanishs26/sast-cli:latest \
 --table /scan
+=======
+-v /path/to/project:/data \
+tanishs26/xrayflow:latest \
+--table /data
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -319,7 +354,11 @@ Inside Docker, always scan `/scan`, not your local path.
 ## SARIF Integration (CI/CD)
 
 ```bash
+<<<<<<< HEAD
 sast-cli --sarif ./project > results.sarif
+=======
+docker run --rm -v /path/to/xrt:/scan tanishs26/xrayflow:latest --table /scan
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 Upload to the GitHub Security tab.
@@ -394,6 +433,7 @@ Top risks:
 
 ## Architecture
 
+<<<<<<< HEAD
 ```
 sast-c          C/C++ analysis engine
 sast-js         JavaScript engine (experimental)
@@ -429,6 +469,15 @@ sast-api        REST API (in progress)
 * CI/CD security scanning
 * Secure code review
 * Large-scale codebase analysis
+=======
+| Component  | Description                        |
+| ---------- | ---------------------------------- |
+| `sast-c`   | C/C++ analysis engine              |
+| `sast-js`  | JavaScript analysis (experimental) |
+| `rbom`     | Risk scoring engine                |
+| `xrayflow` | CLI interface                      |
+| `sast-api` | REST API service                   |
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
 ---
 
@@ -442,10 +491,26 @@ sast-api        REST API (in progress)
 
 ## Roadmap
 
+<<<<<<< HEAD
 * SARIF GitHub native integration
 * AI-based vulnerability explanation
 * CI/CD automation
 * Web dashboard
+=======
+* [ ] Function pointer resolution
+* [ ] SARIF output (GitHub Security tab)
+* [ ] AI-based vulnerability explanation
+* [ ] CI/CD pipeline integration
+* [ ] Web dashboard
+
+---
+
+## Local Development
+
+```bash
+cargo run -p xrayflow -- ./test.c --json
+```
+>>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
 ---
 
