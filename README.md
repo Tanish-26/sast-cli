@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-# sast-cli — Advanced Static Analysis Engine for C/C++
-=======
 # XrayFlow — Exploit-Aware Static Analysis Engine
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
-sast-cli is a high-performance static analysis (SAST) engine written in Rust for detecting and validating memory corruption and input-driven vulnerabilities in C/C++ codebases.
+XrayFlow is a high-performance static analysis (SAST) engine written in Rust for detecting and validating memory corruption and input-driven vulnerabilities in C/C++ codebases.
 
 It combines interprocedural dataflow analysis with multi-stage validation (CFG, feasible path, dominance, and state tracking) to significantly reduce false positives while maintaining high detection coverage.
 
@@ -12,7 +8,7 @@ It combines interprocedural dataflow analysis with multi-stage validation (CFG, 
 
 Comprehensive documentation covering usage, architecture, and validation engine:
 
-👉 **https://tanish-26.gitbook.io/Sast-cli**
+👉 **https://tanish-26.gitbook.io/xrayflow**
 
 ---
 
@@ -23,7 +19,7 @@ Traditional SAST tools often suffer from either:
 * High recall but noisy results (false positives), or
 * High precision but limited detection
 
-sast-cli bridges this gap using a **two-stage pipeline**:
+XrayFlow bridges this gap using a **two-stage pipeline**:
 
 ### Detection Phase
 
@@ -98,7 +94,7 @@ export PATH=$PATH:$(pwd)/target/release
 ### Run Your First Scan
 
 ```bash
-sast-cli --table ./your_project
+xrayflow --table ./your_project
 ```
 
 ---
@@ -108,8 +104,8 @@ sast-cli --table ./your_project
 ### Option 1: Build from Source (Recommended)
 
 ```bash
-git clone https://github.com/Tanish-26/sast-cli.git
-cd sast-cli/rust
+git clone https://github.com/Tanish-26/xrayflow.git
+cd xrayflow/rust
 cargo build --release
 ```
 
@@ -121,15 +117,11 @@ cargo build --release
 cargo install --path apps/xrayflow
 ```
 
-<<<<<<< HEAD
-=======
 Run:
-
 ```bash
 xrayflow --help
 ```
 
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ---
 
 ### Option 3: Run Without Installing
@@ -203,11 +195,8 @@ xrayflow [OPTIONS] <PATHS>...
 ### Scan Directory
 
 ```bash
-<<<<<<< HEAD
-sast-cli ./project
-=======
+xrayflow ./project
 xrayflow --table ./project
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -215,11 +204,8 @@ xrayflow --table ./project
 ### Scan Single File
 
 ```bash
-<<<<<<< HEAD
-sast-cli main.c
-=======
+xrayflow main.c
 xrayflow --json main.c
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -227,7 +213,7 @@ xrayflow --json main.c
 ### JSON Output
 
 ```bash
-sast-cli --json ./project > results.json
+xrayflow --json ./project > results.json
 ```
 
 ---
@@ -245,11 +231,8 @@ xrayflow --report ./project > report.md
 ### High Confidence Findings Only
 
 ```bash
-<<<<<<< HEAD
-sast-cli --min-confidence high ./project
-=======
+xrayflow --min-confidence high ./project
 xrayflow --baseline baseline.json ./project
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -257,7 +240,7 @@ xrayflow --baseline baseline.json ./project
 ### Only Validated Vulnerabilities
 
 ```bash
-sast-cli --validated-only ./project
+xrayflow --validated-only ./project
 ```
 
 ---
@@ -265,7 +248,7 @@ sast-cli --validated-only ./project
 ### Show Execution Path
 
 ```bash
-sast-cli --show-path ./project
+xrayflow --show-path ./project
 ```
 
 Example:
@@ -279,7 +262,7 @@ free@file.c:20 → use@file.c:25
 ### Show Validation Notes
 
 ```bash
-sast-cli --show-notes ./project
+xrayflow --show-notes ./project
 ```
 
 Example notes:
@@ -293,7 +276,7 @@ Example notes:
 ### Prioritize by Exploitability
 
 ```bash
-sast-cli --sort-by-exploitability --top 10 ./project
+xrayflow --sort-by-exploitability --top 10 ./project
 ```
 
 ---
@@ -301,7 +284,7 @@ sast-cli --sort-by-exploitability --top 10 ./project
 ### Best Practice Scan
 
 ```bash
-sast-cli --validated-only --min-confidence high --sort-by-exploitability ./project
+xrayflow --validated-only --min-confidence high --sort-by-exploitability ./project
 ```
 
 ---
@@ -319,11 +302,8 @@ docker pull tanishs26/xrayflow:latest
 ### Scan Current Directory
 
 ```bash
-<<<<<<< HEAD
-docker run --rm -v $(pwd):/scan tanishs26/sast-cli:latest --table /scan
-=======
+docker run --rm -v $(pwd):/scan tanishs26/xrayflow:latest --table /scan
 docker run --rm -v $(pwd):/data tanishs26/xrayflow:latest --table .
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -332,15 +312,12 @@ docker run --rm -v $(pwd):/data tanishs26/xrayflow:latest --table .
 
 ```bash
 docker run --rm \
-<<<<<<< HEAD
 -v /absolute/path/to/project:/scan \
-tanishs26/sast-cli:latest \
+tanishs26/xrayflow:latest \
 --table /scan
-=======
 -v /path/to/project:/data \
 tanishs26/xrayflow:latest \
 --table /data
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 ---
@@ -354,11 +331,8 @@ Inside Docker, always scan `/scan`, not your local path.
 ## SARIF Integration (CI/CD)
 
 ```bash
-<<<<<<< HEAD
-sast-cli --sarif ./project > results.sarif
-=======
+xrayflow --sarif ./project > results.sarif
 docker run --rm -v /path/to/xrt:/scan tanishs26/xrayflow:latest --table /scan
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 ```
 
 Upload to the GitHub Security tab.
@@ -369,7 +343,7 @@ Upload to the GitHub Security tab.
 
 Command
 ```bash
-sast-cli --min-confidence high --show-path  ../../Scanner-test/
+xrayflow --min-confidence high --show-path  ../../Scanner-test/
 ```
 
 ```bash
@@ -433,24 +407,22 @@ Top risks:
 
 ## Architecture
 
-<<<<<<< HEAD
 ```
 sast-c          C/C++ analysis engine
 sast-js         JavaScript engine (experimental)
 sast-validator  multi-stage validation engine
 rbom            risk scoring
-sast-cli        CLI interface
+xrayflow        CLI interface
 sast-api        REST API (in progress)
 ```
 
 ---
 
-## Version v1.2.0 Highlights
+## Version v1.0 Highlights
 
 * Dominance-aware validation (CFG dominators)
 * Feasible-path validation (constraint-based)
 * Multi-mode validation:
-
   * Taint
   * Structural
   * State-based
@@ -469,7 +441,7 @@ sast-api        REST API (in progress)
 * CI/CD security scanning
 * Secure code review
 * Large-scale codebase analysis
-=======
+
 | Component  | Description                        |
 | ---------- | ---------------------------------- |
 | `sast-c`   | C/C++ analysis engine              |
@@ -477,7 +449,6 @@ sast-api        REST API (in progress)
 | `rbom`     | Risk scoring engine                |
 | `xrayflow` | CLI interface                      |
 | `sast-api` | REST API service                   |
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
 ---
 
@@ -491,12 +462,12 @@ sast-api        REST API (in progress)
 
 ## Roadmap
 
-<<<<<<< HEAD
 * SARIF GitHub native integration
 * AI-based vulnerability explanation
 * CI/CD automation
 * Web dashboard
-=======
+
+Future Changes and Implementation
 * [ ] Function pointer resolution
 * [ ] SARIF output (GitHub Security tab)
 * [ ] AI-based vulnerability explanation
@@ -510,7 +481,6 @@ sast-api        REST API (in progress)
 ```bash
 cargo run -p xrayflow -- ./test.c --json
 ```
->>>>>>> 6523410 (docs: update README with v1.0 and tool name changed)
 
 ---
 
